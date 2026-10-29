@@ -31,10 +31,11 @@ test that identical queries always collide in every band.
 hash it gets `hint` without that node; after changing all, `miss`.
 
 ## M3 — Integrations
-- [ ] Python middleware: `with ragtrail.turn(store, resolver, scope, query) as t:` exposes `t.recall`, `t.step`, `t.cite`,
+- [x] Python middleware: `with ragtrail.turn(store, resolver, scope, query) as t:` exposes `t.recall`, `t.step`, `t.cite`,
       auto-commit on exit with outcome
-- [ ] `ragtrail[subforest]`: `SubforestResolver` using subforest node ids and section text hashes
-- [ ] Example: plain chunk-id RAG (no subforest) in `examples/`
+- [x] `ragtrail[subforest]`: `SubforestResolver` using subforest node ids and section text hashes
+      (as `ragtrail.subforest`, no extra until subforest is on PyPI; see decisions)
+- [x] Example: plain chunk-id RAG (no subforest) in `examples/`
 
 **Accept:** both examples run against the fixture corpus offline.
 
