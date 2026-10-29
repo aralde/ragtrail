@@ -13,6 +13,14 @@ dependencies = [
     "pydantic>=2.14.1",
 ]
 
+[project.scripts]
+ragtrail = "ragtrail.cli:main"
+
+[project.optional-dependencies]
+mcp = [
+    "mcp>=2.3",
+]
+
 [build-system]
 requires = ["uv_build>=0.13.4,<0.14.0"]
 build-backend = "uv_build"
