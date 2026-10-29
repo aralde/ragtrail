@@ -3,11 +3,11 @@
 Each milestone ends green: `uv run ruff check . && uv run mypy src && uv run pytest`, checkboxes ticked, commit.
 
 ## M0 — Scaffold + models + SQLite store
-- [ ] `uv init --lib`, `src/ragtrail/`, MIT `LICENSE`, `README.md` stub, `docs/decisions.md`
-- [ ] Pydantic models from `CLAUDE.md` (`NodeRef`, `Step`, `Trajectory`, `RecallResult`)
-- [ ] `TrajectoryStore` protocol: `put`, `get`, `candidates(scope, band_keys)`, `mark_stale`, `incr_hits`, `purge_expired`
-- [ ] `SQLiteStore` implementing it, with the key layout from `CLAUDE.md`, TTL honored on read and via `purge_expired`
-- [ ] CI (GitHub Actions): ruff, mypy, pytest on 3.11 and 3.12
+- [x] `uv init --lib`, `src/ragtrail/`, MIT `LICENSE`, `README.md` stub, `docs/decisions.md`
+- [x] Pydantic models from `CLAUDE.md` (`NodeRef`, `Step`, `Trajectory`, `RecallResult`)
+- [x] `TrajectoryStore` protocol: `put`, `get`, `candidates(scope, band_keys)`, `mark_stale`, `incr_hits`, `purge_expired`
+- [x] `SQLiteStore` implementing it, with the key layout from `CLAUDE.md`, TTL honored on read and via `purge_expired`
+- [x] CI (GitHub Actions): ruff, mypy, pytest on 3.11 and 3.12
 
 **Accept:** round-trip put/get/candidates tests; expired items never returned; scopes never mix.
 
