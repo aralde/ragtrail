@@ -56,7 +56,7 @@ or with plain chunk/doc ids from any RAG stack.
 - `NodeRef(node_id: str, content_hash: str)`
 - `Step(tool: str, args: dict, returned: list[str])`
 - `Trajectory(id, scope, query, query_norm, signature: list[int], steps: list[Step], useful: list[NodeRef],
-   outcome: "verified"|"feedback"|"accepted", created_at, expires_at, hits: int)`
+   outcome: "verified"|"feedback"|"accepted", created_at, expires_at, hits: int, stale: bool)`
 - `RecallResult(mode: "prefetch"|"hint"|"miss", trajectory_id | None, similarity: float,
    nodes: list[NodeRef], stale: list[str], rendered: str)`
 
