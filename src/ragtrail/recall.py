@@ -127,12 +127,15 @@ def recall(
     budget_tokens: int = DEFAULT_BUDGET_TOKENS,
     config: MatchConfig = DEFAULT_CONFIG,
     estimator: Estimator = estimate_tokens,
+    allow_prefetch: bool = True,
 ) -> RecallResult:
     """Find a trajectory for a similar past question in `scope` and hand back its still-valid path.
 
     - `prefetch`: similarity ≥ `prefetch_threshold` and every useful node unchanged; node texts included.
     - `hint`: similarity ≥ `hint_threshold`, or some nodes changed; lists only still-valid nodes.
     - `miss`: nothing similar, or every useful node changed (that trajectory is marked stale).
+
+    `allow_prefetch=False` caps the mode at `hint` (for resolvers that cannot read node text).
 
     >>> from ragtrail.recorder import Recorder
     >>> from ragtrail.resolver import GenericResolver, text_hash
@@ -163,7 +166,8 @@ def recall(
         if not valid:
             store.mark_stale(scope, trajectory.id)
             continue
-        wanted: Mode = "prefetch" if sim >= config.prefetch_threshold and not changed else "hint"
+        full = allow_prefetch and sim >= config.prefetch_threshold and not changed
+        wanted: Mode = "prefetch" if full else "hint"
         mode, rendered = render(wanted, sim, valid, changed, resolver, budget_tokens, estimator)
         store.incr_hits(scope, trajectory.id)
         return RecallResult(
