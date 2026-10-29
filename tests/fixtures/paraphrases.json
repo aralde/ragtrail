@@ -1,0 +1,17 @@
+{
+  "_comment": "Each group is one intent phrased several ways (near paraphrases). Pairs inside a group are paraphrases; pairs across groups are unrelated. Fictional product, no third-party content.",
+  "groups": [
+    ["How do I refresh an expired access token?", "how can I refresh my access token when it expires", "Refresh expired access token"],
+    ["How do I reset my password?", "How can I reset my password", "reset password how?"],
+    ["What are the API rate limits?", "What is the rate limit of the API?", "API rate limits"],
+    ["How do I delete my account?", "How can I delete my account permanently?", "delete account"],
+    ["How do I export my data to CSV?", "Export data as CSV", "How can I export all my data to a CSV file?"],
+    ["How do I add a custom domain to my site?", "Add custom domain to site", "how to add a custom domain on my site"],
+    ["Why was my payment declined?", "Why is my payment being declined?", "payment declined why"],
+    ["How do I invite a teammate to my workspace?", "Invite teammate to workspace", "how can I invite a new teammate to the workspace"],
+    ["¿Cómo cambio el idioma de la cuenta?", "como cambiar el idioma de mi cuenta", "Cambiar idioma de la cuenta"],
+    ["¿Cómo cancelo mi suscripción?", "como cancelar la suscripcion", "Cancelar mi suscripción"],
+    ["¿Por qué no llegan los correos de verificación?", "no me llega el correo de verificacion por que", "Correos de verificación no llegan"],
+    ["¿Cómo conecto mi tienda con el webhook de pedidos?", "conectar tienda con webhook de pedidos", "Cómo conectar el webhook de pedidos a mi tienda"]
+  ]
+}
