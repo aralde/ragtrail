@@ -23,3 +23,13 @@ One line per decision: date — decision — reason.
 - 2026-10-29 — Thresholds live in `MatchConfig`: `prefetch_threshold=0.5`, `hint_threshold=0.25` (hint must be ≤ prefetch) — sit between the fixture's unrelated max (0.10) and paraphrase median (0.58); to be retuned with M5's eval.
 - 2026-10-29 — An empty normalized query cannot be signed (`ValueError`) — callers treat it as a miss / refuse to record rather than letting all empty queries collide.
 - 2026-10-29 — Band hash is blake2b-64 hex of the band's comma-joined rows — short, stable store keys.
+- 2026-10-29 — `NodeResolver` gains `label(node_id) -> str` (breadcrumb) next to `content_hash` and `read`; `content_hash` returns `None` for a deleted node, which counts as changed — the recall contract shows breadcrumbs in hint mode without reading node text; `GenericResolver` defaults the label to the id.
+- 2026-10-29 — `text_hash(text)` = first 16 hex chars of sha256 is offered as the default hash helper — short, stable, stdlib.
+- 2026-10-29 — Admission also requires a non-empty normalized query and at least one cited node that still resolves; `useful` = cited nodes in citation order with their hash at commit time — a trajectory with nothing to hand back is useless; hashing at commit pins what the answer actually saw.
+- 2026-10-29 — Steps are stored as given (tool, args, returned ids); keeping answers out of `args` is the caller's job — ragtrail never receives the answer text in its API.
+- 2026-10-29 — Every admitted turn writes a new trajectory, including turns served by a recall hit — new phrasings widen coverage; dedup/merge is deferred until the M5 eval shows store growth matters.
+- 2026-10-29 — Ranking: estimated Jaccard desc, then hits desc, then newest; recall walks the ranked list above `hint_threshold` and uses the first trajectory with any still-valid node, marking fully changed ones stale on the way — one dead trajectory does not hide a good older one.
+- 2026-10-29 — A miss reports the best candidate's similarity (0.0 if none) — useful for tuning thresholds; `rendered` is empty on a miss so the agent sees nothing.
+- 2026-10-29 — Budget: header and footer are always kept; prefetch adds whole node texts in citation order while they fit, lists the rest as one-line refs, and collapses overflow into `(+N more nodes)`; a prefetch where no node text fits is returned as `hint` — never cut a node mid-text; the mode tells the truth about what was included.
+- 2026-10-29 — Default `budget_tokens` is 1500, tokens estimated as `ceil(chars / 4)` (pluggable `estimator`) — enough for 2–4 typical sections; no tokenizer dependency in core.
+- 2026-10-29 — `recall` increments `hits` on every non-miss — gives ranking and eval a usage signal.

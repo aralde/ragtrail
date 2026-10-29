@@ -21,11 +21,11 @@ Each milestone ends green: `uv run ruff check . && uv run mypy src && uv run pyt
 test that identical queries always collide in every band.
 
 ## M2 — Recorder, admission policy, recall
-- [ ] `NodeResolver` protocol + `GenericResolver(hash_fn, read_fn)`
-- [ ] `Recorder`: `step(tool, args, returned)`, `cite(node_ids)`, `commit(outcome)`; drops the turn if no positive outcome
-- [ ] `recall(query, scope, budget_tokens)`: candidates → rank → hash validation → `prefetch | hint | miss`
-- [ ] Renderer for both modes following the recall contract; budgeted
-- [ ] Stale handling: partial → hint; total → miss + `mark_stale`
+- [x] `NodeResolver` protocol + `GenericResolver(hash_fn, read_fn)`
+- [x] `Recorder`: `step(tool, args, returned)`, `cite(node_ids)`, `commit(outcome)`; drops the turn if no positive outcome
+- [x] `recall(query, scope, budget_tokens)`: candidates → rank → hash validation → `prefetch | hint | miss`
+- [x] Renderer for both modes following the recall contract; budgeted
+- [x] Stale handling: partial → hint; total → miss + `mark_stale`
 
 **Accept:** scripted fake agent: turn 1 records, turn 2 with a paraphrase gets `prefetch`; after changing one node's
 hash it gets `hint` without that node; after changing all, `miss`.

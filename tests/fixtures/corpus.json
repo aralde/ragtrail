@@ -1,0 +1,12 @@
+{
+  "_comment": "Tiny docs corpus for a fictional product (Larch). Node ids are opaque; labels are breadcrumbs.",
+  "nodes": {
+    "n31": {"label": "Authentication › Overview", "text": "Larch uses OAuth 2.0. Every API call carries a bearer access token."},
+    "n33": {"label": "Authentication › Tokens", "text": "Access tokens expire after 60 minutes. Expired tokens return HTTP 401 with code token_expired."},
+    "n35": {"label": "Authentication › Refresh", "text": "To refresh an access token, POST the refresh_token to /oauth/token with grant_type=refresh_token."},
+    "n58": {"label": "API › Sessions", "text": "Sessions are bound to one refresh token. Revoking the session revokes its tokens."},
+    "n70": {"label": "Account › Password", "text": "To reset your password, open Settings › Security and choose Reset password. A link is emailed."},
+    "n72": {"label": "Account › Email", "text": "Password reset emails come from no-reply@larch.example and expire after 24 hours."},
+    "n90": {"label": "Billing › Payments", "text": "Payments are declined when the card issuer refuses the charge or the billing address does not match."}
+  }
+}
