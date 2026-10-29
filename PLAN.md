@@ -12,10 +12,10 @@ Each milestone ends green: `uv run ruff check . && uv run mypy src && uv run pyt
 **Accept:** round-trip put/get/candidates tests; expired items never returned; scopes never mix.
 
 ## M1 — Normalization + MinHash/LSH matcher
-- [ ] `normalize(query)`: lowercase, Unicode NFKC, strip punctuation, collapse whitespace, optional stopword list (en/es)
-- [ ] Shingles (word 2-grams + char 4-grams), MinHash with fixed seeds (default 128 perms), LSH bands (default 32×4)
-- [ ] `similarity(sig_a, sig_b)` = estimated Jaccard; `band_keys(scope, sig)`
-- [ ] Tunables in one `MatchConfig`; document the precision/recall trade-off in `docs/decisions.md`
+- [x] `normalize(query)`: lowercase, Unicode NFKC, strip punctuation, collapse whitespace, optional stopword list (en/es)
+- [x] Shingles (word 2-grams + char 4-grams), MinHash with fixed seeds (default 126 perms), LSH bands (default 42×3, see decisions)
+- [x] `similarity(sig_a, sig_b)` = estimated Jaccard; `band_keys(scope, sig)`
+- [x] Tunables in one `MatchConfig`; document the precision/recall trade-off in `docs/decisions.md`
 
 **Accept:** deterministic signatures across runs; paraphrase pairs in fixtures score above unrelated pairs; property
 test that identical queries always collide in every band.

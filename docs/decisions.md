@@ -15,3 +15,11 @@ One line per decision: date — decision — reason.
 - 2026-10-29 — `SQLiteStore` keeps `hits` and `stale` as columns that override the stored JSON — counters update in place without rewriting the document.
 - 2026-10-29 — Store tests are written against the `TrajectoryStore` protocol with a parametrized `store` fixture — cloud backends (M6/M7) reuse the same suite against their fakes.
 - 2026-10-29 — Docstring examples run as doctests (`--doctest-modules`) — keeps the "every public function has an example" rule honest.
+- 2026-10-29 — Normalization strips accents by default (`keep_accents=False`) and drops built-in en+es stopwords; question words are not stopwords; if every word is a stopword the words are kept — "cómo"/"como" should match, "how"/"why" should not, and a query never normalizes to nothing.
+- 2026-10-29 — Punctuation, symbols, separators and control chars (Unicode categories P/S/Z/C) become spaces; digits stay — "rate-limit" and "rate limit" match; "v2" stays meaningful.
+- 2026-10-29 — Shingles: word 2-grams (`w:`) + char 4-grams (`c:`) over the normalized text; texts shorter than an n-gram contribute themselves — short queries ("delete account") still get a signature.
+- 2026-10-29 — MinHash uses blake2b-64 shingle hashes and universal hashing `(a·x + b) mod (2^61 − 1)` with `a, b` from `random.Random(seed)` — stdlib only, identical across processes and Python versions (no `hash()` randomization); values fit a signed 64-bit int for DynamoDB/Cosmos.
+- 2026-10-29 — Default LSH layout is 42 bands × 3 rows (126 perms) instead of the planned 32 × 4 — on `tests/fixtures/paraphrases.json`, 32×4 surfaced 31/36 paraphrase pairs as candidates (P(collide | s=0.35) = 0.38); 42×3 surfaces 36/36 with 2/594 unrelated collisions; 64×2 also 36/36 but 18/594 unrelated (more reads). Paraphrase similarity ≥ 0.35, unrelated ≤ 0.10.
+- 2026-10-29 — Thresholds live in `MatchConfig`: `prefetch_threshold=0.5`, `hint_threshold=0.25` (hint must be ≤ prefetch) — sit between the fixture's unrelated max (0.10) and paraphrase median (0.58); to be retuned with M5's eval.
+- 2026-10-29 — An empty normalized query cannot be signed (`ValueError`) — callers treat it as a miss / refuse to record rather than letting all empty queries collide.
+- 2026-10-29 — Band hash is blake2b-64 hex of the band's comma-joined rows — short, stable store keys.
