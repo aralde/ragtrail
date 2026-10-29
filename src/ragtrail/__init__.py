@@ -1,6 +1,7 @@
 """ragtrail: a trajectory cache for agentic RAG. Cache the path, never the answer."""
 
 from ragtrail.match import MatchConfig
+from ragtrail.middleware import Turn, turn
 from ragtrail.models import NodeRef, RecallResult, Step, Trajectory
 from ragtrail.recall import recall
 from ragtrail.recorder import Recorder
@@ -18,5 +19,7 @@ __all__ = [
     "Step",
     "Trajectory",
     "TrajectoryStore",
+    "Turn",
     "recall",
+    "turn",
 ]
