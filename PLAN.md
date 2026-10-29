@@ -40,10 +40,10 @@ hash it gets `hint` without that node; after changing all, `miss`.
 **Accept:** both examples run against the fixture corpus offline.
 
 ## M4 — MCP server
-- [ ] `ragtrail[mcp]`: stdio server with tools `recall(query, scope?, budget_tokens?)` and
+- [x] `ragtrail[mcp]`: stdio server with tools `recall(query, budget_tokens?)` (scope bound per server, see decisions) and
       `record(query, steps, cited, outcome)`; `ragtrail serve --db trails.db`
-- [ ] README snippet for `claude mcp add …` and other MCP clients
-- [ ] Manual smoke test from a real MCP client; note result in `docs/decisions.md`
+- [x] README snippet for `claude mcp add …` and other MCP clients
+- [x] Manual smoke test from a real MCP client; note result in `docs/decisions.md`
 
 **Accept:** tools listed and callable; a recorded trail is recalled in the next turn.
 
