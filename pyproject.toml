@@ -49,3 +49,7 @@ plugins = ["pydantic.mypy"]
 testpaths = ["src", "tests"]
 addopts = "--doctest-modules"
 doctest_optionflags = ["ELLIPSIS"]
+
+[[tool.mypy.overrides]]
+module = ["subforest", "subforest.*"]
+ignore_missing_imports = true
