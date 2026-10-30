@@ -48,13 +48,15 @@ hash it gets `hint` without that node; after changing all, `miss`.
 **Accept:** tools listed and callable; a recorded trail is recalled in the next turn.
 
 ## M5 — Eval: cold vs warm (the headline)
-- [ ] `docs/datasets.md` with licenses; download script, no data committed. Start with WixQA (MIT, KB snapshot included)
-- [ ] Split so warm-up and test questions are **disjoint** (e.g. warm with WixQA-Simulated + Synthetic, test on
+- [x] `docs/datasets.md` with licenses; download script, no data committed. Start with WixQA (MIT, KB snapshot included)
+- [x] Split so warm-up and test questions are **disjoint** (e.g. warm with WixQA-Simulated + Synthetic, test on
       ExpertWritten); report leakage checks
-- [ ] Agent loop with pluggable LLM (Anthropic default) and a retriever (subforest if installed, else SQLite FTS5)
-- [ ] Arms: `cold` (empty trail store) vs `warm` (after warm-up); same model, same retriever
-- [ ] Metrics: hit rate by mode, tool calls, tokens in/out, latency, answer accuracy (LLM judge, prompt in repo)
-- [ ] `ragtrail eval --dataset wixqa --n 200` → markdown report in `reports/`
+- [x] Agent loop with pluggable LLM (Anthropic default) and a retriever (subforest if installed, else SQLite FTS5)
+      (`claude -p` with Haiku on the subscription; subforest required, FTS5 fallback deferred; see decisions)
+- [x] Arms: `cold` (empty trail store) vs `warm` (after warm-up); same model, same retriever
+- [x] Metrics: hit rate by mode, tool calls, tokens in/out, latency, answer accuracy (LLM judge, prompt in repo)
+- [x] `ragtrail eval --dataset wixqa --n 200` → markdown report in `reports/`
+      (as `ragtrail eval fetch|paraphrase|offline|agent|judge|report`; offline on all 200, agent as a pilot)
 
 **Accept:** reproducible report; accuracy delta warm−cold reported with confidence interval, not just the mean.
 
