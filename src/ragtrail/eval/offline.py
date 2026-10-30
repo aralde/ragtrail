@@ -11,6 +11,7 @@ import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from ragtrail.embed import DEFAULT_EMBED_CONFIG, Embedder
 from ragtrail.eval.data import EvalQuestion
 from ragtrail.eval.stats import wilson
 from ragtrail.match import DEFAULT_CONFIG, MatchConfig, band_keys, normalize_query, signature, similarity
@@ -29,6 +30,7 @@ def warm_up(
     questions: Sequence[EvalQuestion],
     scope: str,
     config: MatchConfig = DEFAULT_CONFIG,
+    embedder: Embedder | None = None,
 ) -> int:
     """Record one oracle trail per question (citing its gold docs); return how many were admitted.
 
@@ -41,7 +43,7 @@ def warm_up(
     """
     admitted = 0
     for q in questions:
-        rec = Recorder(store, resolver, scope, q.question, config=config)
+        rec = Recorder(store, resolver, scope, q.question, config=config, embedder=embedder)
         rec.step("oracle", {"question_id": q.id}, q.gold)
         rec.cite(q.gold)
         admitted += rec.commit("verified") is not None
@@ -68,11 +70,14 @@ def recall_rows(
     *,
     budget_tokens: int,
     config: MatchConfig = DEFAULT_CONFIG,
+    embedder: Embedder | None = None,
 ) -> list[RecallRow]:
     """Run `recall` for every question and score whether the recalled nodes include a gold doc."""
     rows = []
     for q in questions:
-        result = recall(store, resolver, q.question, scope, budget_tokens=budget_tokens, config=config)
+        result = recall(
+            store, resolver, q.question, scope, budget_tokens=budget_tokens, config=config, embedder=embedder
+        )
         nodes = tuple(n.node_id for n in result.nodes)
         rows.append(
             RecallRow(
@@ -158,6 +163,7 @@ class OfflineReport:
     budget_tokens: int
     dev_matches: list[tuple[float, bool]] | None = None
     dev_label: str = ""
+    embed_model: str | None = None
 
     def markdown(self) -> str:
         """Render as Markdown."""
@@ -173,6 +179,11 @@ class OfflineReport:
             f"- Thresholds: hint ≥ {self.config.hint_threshold}, "
             f"prefetch ≥ {self.config.prefetch_threshold}; LSH {self.config.bands}x{self.config.rows}; "
             f"recall budget {self.budget_tokens} tokens",
+            f"- Embedding matcher: {self.embed_model} (cosine hint ≥ {DEFAULT_EMBED_CONFIG.hint_threshold}, "
+            f"prefetch ≥ {DEFAULT_EMBED_CONFIG.prefetch_threshold}; SimHash {DEFAULT_EMBED_CONFIG.bands}x"
+            f"{DEFAULT_EMBED_CONFIG.rows})"
+            if self.embed_model
+            else "- Embedding matcher: off",
             "",
             "| Mode | Questions | Share | Recalled nodes include gold (95% CI) | Mean similarity "
             "| Mean recall tokens |",

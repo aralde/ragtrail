@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from ragtrail.embed import DEFAULT_MODEL
 from ragtrail.eval.data import (
     TEST_SPLIT,
     WARM_SPLITS,
@@ -56,6 +57,10 @@ SCENARIOS = {
         True,
     ),
 }
+
+
+def _run(args: argparse.Namespace, sc: Scenario) -> str:
+    return sc.name + ("-embed" if getattr(args, "embed", None) else "")
 
 
 def _dir(root: Path) -> Path:
@@ -121,17 +126,24 @@ def cmd_offline(args: argparse.Namespace) -> int:  # pragma: no cover - needs su
     from ragtrail.subforest import SubforestResolver
 
     sc = SCENARIOS[args.scenario]
+    embedder = None
+    if args.embed:
+        from ragtrail.embed import FastEmbedder
+
+        embedder = FastEmbedder(args.embed)
     warm, test = _questions(args.data, sc.warm), _questions(args.data, sc.test)
-    db = _dir(args.data) / f"trails-{sc.name}.db"
+    db = _dir(args.data) / f"trails-{_run(args, sc)}.db"
     db.unlink(missing_ok=True)
     with TreeStore(corpus_path(args.data)) as tree, SQLiteStore(db) as store:
-        admitted = warm_up(store, SubforestResolver(tree), warm, "eval")
+        admitted = warm_up(store, SubforestResolver(tree), warm, "eval", embedder=embedder)
     scratch = db.with_suffix(".scoring.db")
     shutil.copyfile(
         db, scratch
     )  # recall bumps hit counters; score on a copy so the warm store stays as built
     with TreeStore(corpus_path(args.data)) as tree, SQLiteStore(scratch) as store:
-        rows = recall_rows(store, SubforestResolver(tree), test, "eval", budget_tokens=args.budget)
+        rows = recall_rows(
+            store, SubforestResolver(tree), test, "eval", budget_tokens=args.budget, embedder=embedder
+        )
     scratch.unlink()
     dev = None
     if sc.dev is not None:
@@ -148,13 +160,14 @@ def cmd_offline(args: argparse.Namespace) -> int:  # pragma: no cover - needs su
         budget_tokens=args.budget,
         dev_matches=dev,
         dev_label=f"{sc.dev[1]} queries against {sc.dev[0]}" if sc.dev else "",
+        embed_model=args.embed,
     )
     md = report.markdown()
     out = _dir(args.data)
-    (out / f"offline-{sc.name}.json").write_text(
+    (out / f"offline-{_run(args, sc)}.json").write_text(
         json.dumps({"rows": [asdict(r) for r in rows]}, ensure_ascii=False), encoding="utf-8"
     )
-    (out / f"offline-{sc.name}.md").write_text(md, encoding="utf-8")
+    (out / f"offline-{_run(args, sc)}.md").write_text(md, encoding="utf-8")
     print(md)
     return 0
 
@@ -163,7 +176,7 @@ def _pilot(args: argparse.Namespace, sc: Scenario) -> list[EvalQuestion]:
     from ragtrail.eval.agent import select_pilot
 
     by_id = {q.id: q for q in _questions(args.data, sc.test)}
-    ids = select_pilot(_rows(args.data, sc.name), args.n, matched_first=sc.matched_first)
+    ids = select_pilot(_rows(args.data, _run(args, sc)), args.n, matched_first=sc.matched_first)
     return [by_id[i] for i in ids]
 
 
@@ -171,13 +184,13 @@ def cmd_agent(args: argparse.Namespace) -> int:  # pragma: no cover - needs the 
     from ragtrail.eval.agent import AgentConfig, run_agent
 
     sc = SCENARIOS[args.scenario]
-    config = AgentConfig(model=args.model, max_calls=args.max_calls)
+    config = AgentConfig(model=args.model, max_calls=args.max_calls, embed=args.embed)
     run_agent(
         _pilot(args, sc),
-        _dir(args.data) / f"runs-{sc.name}.jsonl",
-        scenario=sc.name,
+        _dir(args.data) / f"runs-{_run(args, sc)}.jsonl",
+        scenario=_run(args, sc),
         corpus=corpus_path(args.data).resolve(),
-        warm_db=(_dir(args.data) / f"trails-{sc.name}.db").resolve(),
+        warm_db=(_dir(args.data) / f"trails-{_run(args, sc)}.db").resolve(),
         config=config,
         max_runs=args.max_runs,
     )
@@ -191,11 +204,11 @@ def cmd_judge(args: argparse.Namespace) -> int:  # pragma: no cover - needs the 
 
     sc = SCENARIOS[args.scenario]
     by_id = {q.id: q for q in _questions(args.data, sc.test)}
-    path = _dir(args.data) / f"judgments-{sc.name}.json"
+    path = _dir(args.data) / f"judgments-{_run(args, sc)}.json"
     verdicts: dict[str, str] = json.loads(path.read_text()) if path.exists() else {}
     items = []
-    for run in load_runs(_dir(args.data) / f"runs-{sc.name}.jsonl"):
-        key = judge_key(sc.name, run["id"], run["arm"])
+    for run in load_runs(_dir(args.data) / f"runs-{_run(args, sc)}.jsonl"):
+        key = judge_key(_run(args, sc), run["id"], run["arm"])
         if run["status"] != "ok" or key in verdicts:
             continue
         q = by_id[run["id"]]
@@ -229,17 +242,20 @@ def cmd_report(args: argparse.Namespace) -> int:  # pragma: no cover - needs sub
         "",
     ]
     for sc in SCENARIOS.values():
-        offline = _dir(args.data) / f"offline-{sc.name}.md"
-        if not offline.exists():
-            continue
-        parts.append(offline.read_text(encoding="utf-8").replace(f"## {sc.name}", f"## Scenario: {sc.name}"))
-        runs = load_runs(_dir(args.data) / f"runs-{sc.name}.jsonl")
-        if runs:
-            jpath = _dir(args.data) / f"judgments-{sc.name}.json"
-            verdicts = json.loads(jpath.read_text()) if jpath.exists() else {}
-            paired = pair_runs(sc.name, runs, _questions(args.data, sc.test), doc_of, verdicts)
-            models = ", ".join(sorted({r["model"] for r in runs}))
-            parts += [f"### Agent pilot ({sc.name})", "", agent_markdown(paired, models)]
+        for suffix, matcher in (("", "lexical MinHash"), ("-embed", "lexical + embeddings")):
+            run = sc.name + suffix
+            offline = _dir(args.data) / f"offline-{run}.md"
+            if not offline.exists():
+                continue
+            title = f"## Scenario: {sc.name} — {matcher}"
+            parts.append(offline.read_text(encoding="utf-8").replace(f"## {sc.name}", title, 1))
+            runs = load_runs(_dir(args.data) / f"runs-{run}.jsonl")
+            if runs:
+                jpath = _dir(args.data) / f"judgments-{run}.json"
+                verdicts = json.loads(jpath.read_text()) if jpath.exists() else {}
+                paired = pair_runs(run, runs, _questions(args.data, sc.test), doc_of, verdicts)
+                models = ", ".join(sorted({r["model"] for r in runs}))
+                parts += [f"### Agent pilot ({sc.name}, {matcher})", "", agent_markdown(paired, models)]
     text = "\n".join(parts)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(text, encoding="utf-8")
@@ -260,6 +276,7 @@ def add_eval_parser(sub: Any) -> None:
     o = cmds.add_parser("offline", help="warm up and score recall without an LLM")
     o.add_argument("--scenario", choices=sorted(SCENARIOS), required=True)
     o.add_argument("--budget", type=int, default=2000, help="recall token budget")
+    o.add_argument("--embed", nargs="?", const=DEFAULT_MODEL, help="also match by embeddings (model)")
     o.set_defaults(func=cmd_offline)
     a = cmds.add_parser("agent", help="run the cold/warm agent pilot (claude -p)")
     a.add_argument("--scenario", choices=sorted(SCENARIOS), required=True)
@@ -267,10 +284,12 @@ def add_eval_parser(sub: Any) -> None:
     a.add_argument("--max-runs", type=int, help="stop after this many runs (resume later)")
     a.add_argument("--max-calls", type=int, default=10)
     a.add_argument("--model", default="haiku")
+    a.add_argument("--embed", nargs="?", const=DEFAULT_MODEL, help="warm arm also matches by embeddings")
     a.set_defaults(func=cmd_agent)
     j = cmds.add_parser("judge", help="grade pilot answers against references (claude -p)")
     j.add_argument("--scenario", choices=sorted(SCENARIOS), required=True)
     j.add_argument("--model", default="haiku")
+    j.add_argument("--embed", nargs="?", const=DEFAULT_MODEL, help="judge the embeddings variant")
     j.set_defaults(func=cmd_judge)
     r = cmds.add_parser("report", help="write the Markdown report")
     r.add_argument("--out", type=Path, default=Path("reports/wixqa-eval.md"))

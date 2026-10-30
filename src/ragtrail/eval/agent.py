@@ -49,6 +49,7 @@ class AgentConfig:
     max_calls: int = 10
     docs_budget: int = 800
     recall_budget: int = 2000
+    embed: str | None = None
     corpus_name: str = "the Wix help center"
     claude: str = "claude"
     python: str = sys.executable
@@ -66,6 +67,8 @@ def mcp_config(config: AgentConfig, corpus: Path, trails: Path, work: Path) -> d
     docs += ["--log", str(work / "docs.jsonl")]
     trail = ["-m", "ragtrail.cli", "serve", "--db", str(trails), "--scope", SCOPE, "--subforest", str(corpus)]
     trail += ["--budget", str(config.recall_budget), "--no-record", "--log", str(work / "trails.jsonl")]
+    if config.embed:
+        trail += ["--embed", config.embed]
     return {
         "mcpServers": {
             "docs": {"command": config.python, "args": docs},
