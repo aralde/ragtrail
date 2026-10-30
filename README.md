@@ -20,6 +20,9 @@ ragtrail serve --db trails.db --scope my-team --subforest corpus.db
 The server exposes two tools: `recall(query, budget_tokens?)` at the start of a question and
 `record(query, cited, outcome?, steps?)` after a grounded answer. Each server is bound to one `--scope`.
 
+Add `--embed` (needs `pip install 'ragtrail[embed]'`) to also match paraphrases by embeddings. It uses a local
+CPU model, `BAAI/bge-small-en-v1.5` by default, so there is no API cost.
+
 How it checks nodes:
 
 - `--subforest corpus.db`: a subforest index. Node hashes are checked on every recall and texts are prefetched.
@@ -53,25 +56,34 @@ deletes expired trails.
 Full report: [`reports/wixqa-eval.md`](reports/wixqa-eval.md). Small Haiku pilots through `claude -p`, so treat the
 numbers as directional.
 
-- **Repeat traffic** (the same question asked again in other words). On questions the cache recognizes, the warm
-  agent makes 0.7 fewer tool calls (95% CI 0.17 to 1.27), uses 23% fewer input tokens, and its judged accuracy
-  does not drop (73% → 88%, CI +2 to +28 points; n = 30). Lexical matching recognizes only 25 of 200 paraphrases,
-  but every match points at the right article.
-- **Disjoint questions** (warm-up and test sets from different WixQA splits). Only 11 of 200 test questions match
-  anything, and the agent pilot shows no measurable effect either way (accuracy −2.5 points, CI −12.5 to +7.5;
-  n = 20).
-- **Limits.** The matcher is lexical (MinHash), so paraphrases far from the original miss; an embedding matcher is
-  the planned next step. The judge is the same small model, warm-up trails are oracle citations, and the pilots
-  over-sample cache hits.
+| Scenario, matcher | Test questions matched | Matches pointing at a gold article | Agent pilot: warm vs cold |
+|---|---|---|---|
+| Repeat traffic, lexical | 25/200 | 100% | −0.7 tool calls, −23% input tokens, judge 73% → 88% (n = 30) |
+| Repeat traffic, **+ embeddings** | **179/200** | **100%** | **−1.2 tool calls (−39%), −30% input tokens, judge 78% → 90%** (n = 30) |
+| Disjoint questions, lexical | 11/200 | 36% | no measurable effect (n = 20) |
+| Disjoint questions, + embeddings | 55/200 | 47% | no measurable effect; judge 75% → 75% (n = 20) |
+
+- **Repeat traffic** means the same question asked again in other words: warm-up on WixQA-ExpertWritten, test on
+  one Haiku paraphrase of each. **Disjoint** uses different WixQA splits for warm-up and test, which barely
+  repeat each other.
+- With embeddings, a paraphrased question finds its earlier path 9 times in 10. On the questions in the pilot,
+  the warm agent needs about a third fewer calls, and judged accuracy does not drop (+11.7 points, 95% CI 0 to
+  +23).
+- On disjoint questions the cache rarely fires, and its wrong hints did not lower judged accuracy in the pilot,
+  but the CI is wide (±17.5 points).
+- **Limits.** Pilots are small and stratified (they over-sample cache hits), the judge is the same small model,
+  and warm-up trails are oracle citations.
 
 Reproduce (needs subforest installed alongside and the `claude` CLI):
 
 ```bash
 ragtrail eval fetch
 ragtrail eval paraphrase
-ragtrail eval offline --scenario disjoint && ragtrail eval offline --scenario repeat
-ragtrail eval agent --scenario repeat --n 30 && ragtrail eval agent --scenario disjoint --n 20
-ragtrail eval judge --scenario repeat && ragtrail eval judge --scenario disjoint
+for s in disjoint repeat; do
+  ragtrail eval offline --scenario $s && ragtrail eval offline --scenario $s --embed
+done
+ragtrail eval agent --scenario repeat --n 30 [--embed]    # likewise disjoint with --n 20
+ragtrail eval judge --scenario repeat [--embed]
 ragtrail eval report
 ```
 
