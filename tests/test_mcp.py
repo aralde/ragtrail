@@ -173,3 +173,30 @@ def test_serve_with_subforest_index(tmp_path: Path) -> None:
             assert "Authentication › Tokens" in text_of(hit) and "60 minutes" in text_of(hit)
 
     anyio.run(scenario)
+
+
+def test_calls_are_logged(tmp_path: Path) -> None:
+    log = tmp_path / "calls.jsonl"
+
+    async def scenario() -> None:
+        server = create_server(SQLiteStore(":memory:"), Corpus().resolver(), "acme", log=log)
+        async with Client(server) as client:
+            await client.call_tool("recall", {"query": Q1})
+            await client.call_tool("record", {"query": Q1, "cited": ["n70"]})
+
+    anyio.run(scenario)
+    lines = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [(e["tool"], e.get("mode"), e.get("recorded")) for e in lines] == [
+        ("recall", "miss", None),
+        ("record", None, True),
+    ]
+    assert lines[0]["args"]["query"] == Q1
+
+
+def test_recall_only_server() -> None:
+    async def scenario() -> None:
+        server = create_server(SQLiteStore(":memory:"), Corpus().resolver(), "acme", allow_record=False)
+        async with Client(server) as client:
+            assert [t.name for t in (await client.list_tools()).tools] == ["recall"]
+
+    anyio.run(scenario)

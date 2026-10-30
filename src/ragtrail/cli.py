@@ -67,6 +67,8 @@ def _serve(args: argparse.Namespace) -> int:
             args.scope,
             budget_tokens=args.budget,
             ttl=timedelta(days=args.ttl_days),
+            log=args.log,
+            allow_record=not args.no_record,
         )
         server.run("stdio")
     return 0
@@ -97,7 +99,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--budget", type=int, default=DEFAULT_BUDGET_TOKENS, help="default recall token budget"
     )
     serve.add_argument("--ttl-days", type=float, default=30.0, help="days a recorded trail stays valid")
+    serve.add_argument("--log", type=Path, help="append one JSON line per tool call to this file")
+    serve.add_argument(
+        "--no-record", action="store_true", help="serve recall only; the trail store stays fixed"
+    )
     serve.set_defaults(func=_serve)
+
+    from ragtrail.eval.cli import add_eval_parser
+
+    add_eval_parser(sub)
 
     purge = sub.add_parser("purge", help="delete expired trails")
     purge.add_argument("--db", type=Path, required=True)
