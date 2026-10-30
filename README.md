@@ -48,6 +48,33 @@ Other MCP clients (Claude Desktop, Cursor, …) use the same command in their JS
 Run it next to your retrieval tools (for example subforest's own MCP server). `ragtrail purge --db trails.db`
 deletes expired trails.
 
+## Evaluation (WixQA, early)
+
+Full report: [`reports/wixqa-eval.md`](reports/wixqa-eval.md). Small Haiku pilots through `claude -p`, so treat the
+numbers as directional.
+
+- **Repeat traffic** (the same question asked again in other words). On questions the cache recognizes, the warm
+  agent makes 0.7 fewer tool calls (95% CI 0.17 to 1.27), uses 23% fewer input tokens, and its judged accuracy
+  does not drop (73% → 88%, CI +2 to +28 points; n = 30). Lexical matching recognizes only 25 of 200 paraphrases,
+  but every match points at the right article.
+- **Disjoint questions** (warm-up and test sets from different WixQA splits). Only 11 of 200 test questions match
+  anything, and the agent pilot shows no measurable effect either way (accuracy −2.5 points, CI −12.5 to +7.5;
+  n = 20).
+- **Limits.** The matcher is lexical (MinHash), so paraphrases far from the original miss; an embedding matcher is
+  the planned next step. The judge is the same small model, warm-up trails are oracle citations, and the pilots
+  over-sample cache hits.
+
+Reproduce (needs subforest installed alongside and the `claude` CLI):
+
+```bash
+ragtrail eval fetch
+ragtrail eval paraphrase
+ragtrail eval offline --scenario disjoint && ragtrail eval offline --scenario repeat
+ragtrail eval agent --scenario repeat --n 30 && ragtrail eval agent --scenario disjoint --n 20
+ragtrail eval judge --scenario repeat && ragtrail eval judge --scenario disjoint
+ragtrail eval report
+```
+
 ## Development
 
 ```bash
