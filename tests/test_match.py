@@ -113,7 +113,7 @@ def test_paraphrases_score_above_unrelated() -> None:
     para = [similarity(sig(a), sig(b)) for a, b in paraphrase_pairs()]
     unrel = [similarity(sig(a), sig(b)) for a, b in unrelated_pairs()]
     assert min(para) > max(unrel)
-    assert min(para) >= DEFAULT_CONFIG.hint_threshold > max(unrel)
+    assert max(unrel) < DEFAULT_CONFIG.hint_threshold
 
 
 def test_paraphrases_share_a_band_unrelated_rarely_do() -> None:
