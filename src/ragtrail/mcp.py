@@ -15,6 +15,7 @@ from mcp.server import MCPServer
 from mcp_types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import ValidationError
 
+from ragtrail.embed import Embedder
 from ragtrail.match import DEFAULT_CONFIG, MatchConfig
 from ragtrail.models import Outcome, RecallResult, Step
 from ragtrail.recall import DEFAULT_BUDGET_TOKENS
@@ -76,6 +77,7 @@ def _recall_data(result: RecallResult) -> dict[str, Any]:
         "trajectory_id": result.trajectory_id,
         "nodes": [n.node_id for n in result.nodes],
         "stale": result.stale,
+        "matched_by": result.matched_by,
     }
 
 
@@ -89,6 +91,7 @@ def create_server(
     ttl: timedelta = DEFAULT_TTL,
     log: Path | None = None,
     allow_record: bool = True,
+    embedder: Embedder | None = None,
 ) -> MCPServer:
     """Build an MCP server with `recall` and `record` bound to `store`, `resolver` and `scope`.
 
@@ -131,6 +134,7 @@ def create_server(
             budget_tokens=budget_tokens,
             config=config,
             allow_prefetch=verified,
+            embedder=embedder,
         )
         if result.mode == "miss":
             text = "ragtrail: no similar question solved before. Search as usual."
@@ -147,7 +151,7 @@ def create_server(
             parsed = [Step.model_validate(s) for s in steps or []]
         except ValidationError as exc:
             return _result(f"Invalid steps: {exc.errors()[0]['msg']}.", {"recorded": False}, error=True)
-        recorder = Recorder(store, active, scope, query, config=config, ttl=ttl)
+        recorder = Recorder(store, active, scope, query, config=config, ttl=ttl, embedder=embedder)
         for s in parsed:
             recorder.step(s.tool, s.args, s.returned)
         recorder.cite(cited)

@@ -3,7 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import Literal
 
+from ragtrail.embed import (
+    DEFAULT_EMBED_CONFIG,
+    EmbedConfig,
+    Embedder,
+    cosine,
+    embed_band_keys,
+    normalize_vector,
+)
 from ragtrail.match import DEFAULT_CONFIG, MatchConfig, band_keys, normalize_query, signature, similarity
 from ragtrail.models import Mode, NodeRef, RecallResult, Trajectory
 from ragtrail.resolver import NodeResolver, estimate_tokens
@@ -30,9 +40,50 @@ def node_line(resolver: NodeResolver, node_id: str) -> str:
     return f"[{node_id}]" if not label or label == node_id else f"{label} [{node_id}]"
 
 
-def _rank(candidates: Sequence[Trajectory], sig: Sequence[int]) -> list[tuple[float, Trajectory]]:
-    scored = [(similarity(sig, t.signature), t) for t in candidates if len(t.signature) == len(sig)]
-    return sorted(scored, key=lambda st: (-st[0], -st[1].hits, -st[1].created_at.timestamp(), st[1].id))
+@dataclass(frozen=True)
+class _Match:
+    level: int  # 2: prefetch-level, 1: hint-level, 0: below both thresholds
+    score: float
+    matched_by: Literal["lexical", "embedding"]
+    trajectory: Trajectory
+
+
+def _level(score: float, hint: float, prefetch: float) -> int:
+    return 2 if score >= prefetch else 1 if score >= hint else 0
+
+
+def _rank(
+    candidates: Sequence[Trajectory],
+    sig: Sequence[int],
+    config: MatchConfig,
+    vector: Sequence[float] | None,
+    embed_model: str | None,
+    embed_config: EmbedConfig,
+) -> list[_Match]:
+    """Score each candidate lexically and, when both sides have an embedding of the same model, by cosine;
+    a candidate takes the better of the two levels."""
+    matches = []
+    for t in candidates:
+        if len(t.signature) != len(sig):
+            continue
+        jac = similarity(sig, t.signature)
+        best = _Match(_level(jac, config.hint_threshold, config.prefetch_threshold), jac, "lexical", t)
+        if vector is not None and t.embedding is not None and t.embed_model == embed_model:
+            cos = max(0.0, cosine(vector, t.embedding))
+            lvl = _level(cos, embed_config.hint_threshold, embed_config.prefetch_threshold)
+            if (lvl, cos) > (best.level, best.score):
+                best = _Match(lvl, cos, "embedding", t)
+        matches.append(best)
+    return sorted(
+        matches,
+        key=lambda m: (
+            -m.level,
+            -m.score,
+            -m.trajectory.hits,
+            -m.trajectory.created_at.timestamp(),
+            m.trajectory.id,
+        ),
+    )
 
 
 def _fit_lines(lines: list[str], budget: int, estimator: Estimator, noun: str) -> list[str]:
@@ -128,6 +179,8 @@ def recall(
     config: MatchConfig = DEFAULT_CONFIG,
     estimator: Estimator = estimate_tokens,
     allow_prefetch: bool = True,
+    embedder: Embedder | None = None,
+    embed_config: EmbedConfig = DEFAULT_EMBED_CONFIG,
 ) -> RecallResult:
     """Find a trajectory for a similar past question in `scope` and hand back its still-valid path.
 
@@ -136,6 +189,8 @@ def recall(
     - `miss`: nothing similar, or every useful node changed (that trajectory is marked stale).
 
     `allow_prefetch=False` caps the mode at `hint` (for resolvers that cannot read node text).
+    With an `embedder`, trails recorded with the same model also match by cosine (`embed_config` thresholds),
+    which catches paraphrases that share few words.
 
     >>> from ragtrail.recorder import Recorder
     >>> from ragtrail.resolver import GenericResolver, text_hash
@@ -156,26 +211,35 @@ def recall(
     if not query_norm:
         return _miss()
     sig = signature(query_norm, config)
-    ranked = _rank(store.candidates(scope, band_keys(scope, sig, config)), sig)
-    best_sim = ranked[0][0] if ranked else 0.0
-    for sim, trajectory in ranked:
-        if sim < config.hint_threshold:
+    keys = band_keys(scope, sig, config)
+    vector = None
+    if embedder is not None:
+        vector = normalize_vector(embedder.embed([query])[0])
+        keys += embed_band_keys(scope, vector, embed_config)
+    ranked = _rank(
+        store.candidates(scope, keys), sig, config, vector, embedder.name if embedder else None, embed_config
+    )
+    best_sim = ranked[0].score if ranked else 0.0
+    for match in ranked:
+        if match.level == 0:
             break
+        trajectory = match.trajectory
         valid = [r for r in trajectory.useful if resolver.content_hash(r.node_id) == r.content_hash]
         changed = [r.node_id for r in trajectory.useful if r not in valid]
         if not valid:
             store.mark_stale(scope, trajectory.id)
             continue
-        full = allow_prefetch and sim >= config.prefetch_threshold and not changed
+        full = allow_prefetch and match.level == 2 and not changed
         wanted: Mode = "prefetch" if full else "hint"
-        mode, rendered = render(wanted, sim, valid, changed, resolver, budget_tokens, estimator)
+        mode, rendered = render(wanted, match.score, valid, changed, resolver, budget_tokens, estimator)
         store.incr_hits(scope, trajectory.id)
         return RecallResult(
             mode=mode,
             trajectory_id=trajectory.id,
-            similarity=sim,
+            similarity=min(1.0, match.score),
             nodes=valid,
             stale=changed,
             rendered=rendered,
+            matched_by=match.matched_by,
         )
-    return _miss(best_sim)
+    return _miss(min(1.0, best_sim))

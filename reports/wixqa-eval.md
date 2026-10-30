@@ -8,7 +8,7 @@ How to read the agent pilots:
 - Both arms use the same model, tools, prompt and call cap; only the trail store differs.
 - Accuracy is judged by the same small model, blind to the arm. Questions that miss in both arms run under identical conditions, so their cold→warm change is pure run-to-run noise: read it as the noise floor.
 
-## Scenario: disjoint
+## Scenario: disjoint — lexical MinHash
 
 Warm-up on WixQA-Simulated + WixQA-Synthetic (oracle trails citing their gold articles); test on WixQA-ExpertWritten. Different question sets: this measures how often real new questions repeat an earlier path.
 
@@ -34,7 +34,7 @@ Threshold sweep on the dev pairing (wixqa_simulated queries against wixqa_synthe
 | 0.50 | 8/200 | 6 | 75% (41% to 93%) |
 | 0.60 | 4/200 | 3 | 75% (30% to 95%) |
 
-### Agent pilot (disjoint)
+### Agent pilot (disjoint, lexical MinHash)
 
 20 questions answered in both arms by `haiku` through `claude -p`; same tools, prompt and call cap.
 
@@ -58,7 +58,57 @@ By warm recall mode:
 | hint | 7 | 3.1 → 3.0 | 13,251 → 13,079 | 79% → 86% |
 | miss | 9 | 3.4 → 3.3 | 16,157 → 15,232 | 78% → 61% |
 
-## Scenario: repeat
+## Scenario: disjoint — lexical + embeddings
+
+Warm-up on WixQA-Simulated + WixQA-Synthetic (oracle trails citing their gold articles); test on WixQA-ExpertWritten. Different question sets: this measures how often real new questions repeat an earlier path.
+
+- Warm-up questions: 6421 (6421 trails admitted)
+- Test questions: 200; exact normalized duplicates of a warm-up question: 0
+- Thresholds: hint ≥ 0.4, prefetch ≥ 0.5; LSH 42x3; recall budget 2000 tokens
+- Embedding matcher: BAAI/bge-small-en-v1.5 (cosine hint ≥ 0.88, prefetch ≥ 0.92; SimHash 30x16)
+
+| Mode | Questions | Share | Recalled nodes include gold (95% CI) | Mean similarity | Mean recall tokens |
+|---|---|---|---|---|---|
+| prefetch | 20 | 10% | 11/20 = 55% (34% to 74%) | 0.91 | 727 |
+| hint | 35 | 18% | 15/35 = 43% (28% to 59%) | 0.84 | 57 |
+| miss | 145 | 72% | — | 0.80 | 0 |
+
+Threshold sweep on the dev pairing (wixqa_simulated queries against wixqa_synthetic), never on test:
+
+| Threshold | Matched | Shares a gold doc | Precision (95% CI) |
+|---|---|---|---|
+| 0.25 | 95/200 | 22 | 23% (16% to 33%) |
+| 0.30 | 71/200 | 21 | 30% (20% to 41%) |
+| 0.35 | 47/200 | 18 | 38% (26% to 53%) |
+| 0.40 | 31/200 | 16 | 52% (35% to 68%) |
+| 0.45 | 18/200 | 10 | 56% (34% to 75%) |
+| 0.50 | 8/200 | 6 | 75% (41% to 93%) |
+| 0.60 | 4/200 | 3 | 75% (30% to 95%) |
+
+### Agent pilot (disjoint, lexical + embeddings)
+
+20 questions answered in both arms by `haiku` through `claude -p`; same tools, prompt and call cap.
+
+| Metric | cold | warm | Δ warm - cold | 95% CI |
+|---|---|---|---|---|
+| Tool calls (incl. recall) | 2.95 | 2.55 | -0.40 | -1.00 to +0.15 |
+| Docs tool calls | 1.95 | 1.55 | -0.40 | -1.00 to +0.15 |
+| Input tokens | 13,286 | 12,494 | -792 | -3,965 to +2,217 |
+| Seconds | 12.2 | 12.7 | +0.4 | -1.0 to +1.7 |
+| Saw a gold doc | 95.0% | 85.0% | -10.0% | -30.0% to +10.0% |
+| Answer token F1 | 0.433 | 0.439 | +0.007 | -0.025 to +0.036 |
+| Judge accuracy (n=20) | 75.0% | 75.0% | +0.0% | -17.5% to +17.5% |
+
+Judge: warm better on 4, cold better on 4; sign test p = 1.000.
+
+By warm recall mode:
+
+| Warm recall | Questions | Calls cold → warm | Input tokens cold → warm | Judge cold → warm |
+|---|---|---|---|---|
+| prefetch | 6 | 2.7 → 1.3 | 11,012 → 8,087 | 67% → 92% |
+| hint | 14 | 3.1 → 3.1 | 14,260 → 14,383 | 79% → 68% |
+
+## Scenario: repeat — lexical MinHash
 
 Repeat traffic: warm-up on WixQA-ExpertWritten (oracle trails); test on one model-written paraphrase of each of those questions. Overlap is by design; this measures the intended use case, the same question asked again in other words.
 
@@ -72,7 +122,7 @@ Repeat traffic: warm-up on WixQA-ExpertWritten (oracle trails); test on one mode
 | hint | 19 | 10% | 19/19 = 100% (83% to 100%) | 0.45 | 61 |
 | miss | 175 | 88% | — | 0.16 | 0 |
 
-### Agent pilot (repeat)
+### Agent pilot (repeat, lexical MinHash)
 
 30 questions answered in both arms by `haiku` through `claude -p`; same tools, prompt and call cap.
 
@@ -95,3 +145,41 @@ By warm recall mode:
 | prefetch | 6 | 3.3 → 1.3 | 17,297 → 9,072 | 75% → 92% |
 | hint | 19 | 3.4 → 2.9 | 15,609 → 12,387 | 74% → 89% |
 | miss | 5 | 3.6 → 3.6 | 17,873 → 17,884 | 70% → 80% |
+
+## Scenario: repeat — lexical + embeddings
+
+Repeat traffic: warm-up on WixQA-ExpertWritten (oracle trails); test on one model-written paraphrase of each of those questions. Overlap is by design; this measures the intended use case, the same question asked again in other words.
+
+- Warm-up questions: 200 (200 trails admitted)
+- Test questions: 200; exact normalized duplicates of a warm-up question: 0
+- Thresholds: hint ≥ 0.4, prefetch ≥ 0.5; LSH 42x3; recall budget 2000 tokens
+- Embedding matcher: BAAI/bge-small-en-v1.5 (cosine hint ≥ 0.88, prefetch ≥ 0.92; SimHash 30x16)
+
+| Mode | Questions | Share | Recalled nodes include gold (95% CI) | Mean similarity | Mean recall tokens |
+|---|---|---|---|---|---|
+| prefetch | 110 | 55% | 110/110 = 100% (97% to 100%) | 0.95 | 995 |
+| hint | 69 | 34% | 69/69 = 100% (95% to 100%) | 0.91 | 60 |
+| miss | 21 | 10% | — | 0.84 | 0 |
+
+### Agent pilot (repeat, lexical + embeddings)
+
+30 questions answered in both arms by `haiku` through `claude -p`; same tools, prompt and call cap.
+
+| Metric | cold | warm | Δ warm - cold | 95% CI |
+|---|---|---|---|---|
+| Tool calls (incl. recall) | 3.03 | 1.87 | -1.17 | -1.63 to -0.60 |
+| Docs tool calls | 2.03 | 0.87 | -1.17 | -1.63 to -0.60 |
+| Input tokens | 13,359 | 9,383 | -3,976 | -6,099 to -1,836 |
+| Seconds | 12.3 | 10.9 | -1.4 | -2.2 to -0.5 |
+| Saw a gold doc | 80.0% | 100.0% | +20.0% | +6.7% to +36.7% |
+| Answer token F1 | 0.391 | 0.460 | +0.069 | +0.030 to +0.110 |
+| Judge accuracy (n=30) | 78.3% | 90.0% | +11.7% | +0.0% to +23.3% |
+
+Judge: warm better on 9, cold better on 3; sign test p = 0.146.
+
+By warm recall mode:
+
+| Warm recall | Questions | Calls cold → warm | Input tokens cold → warm | Judge cold → warm |
+|---|---|---|---|---|
+| prefetch | 21 | 3.0 → 1.3 | 12,990 → 7,742 | 74% → 88% |
+| hint | 9 | 3.0 → 3.2 | 14,219 → 13,211 | 89% → 94% |

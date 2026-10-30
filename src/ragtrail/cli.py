@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from datetime import timedelta
 from pathlib import Path
 
+from ragtrail.embed import DEFAULT_MODEL
 from ragtrail.recall import DEFAULT_BUDGET_TOKENS
 from ragtrail.resolver import NodeResolver
 from ragtrail.store import SQLiteStore
@@ -58,6 +59,15 @@ def _serve(args: argparse.Namespace) -> int:
     except (RuntimeError, ValueError, TypeError, ImportError, AttributeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    embedder = None
+    if args.embed is not None:
+        try:
+            from ragtrail.embed import FastEmbedder
+
+            embedder = FastEmbedder(args.embed)
+        except ImportError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
     if resolver is None:
         print("ragtrail: no index attached (--subforest/--resolver); running unverified", file=sys.stderr)
     with SQLiteStore(args.db) as store:
@@ -69,6 +79,7 @@ def _serve(args: argparse.Namespace) -> int:
             ttl=timedelta(days=args.ttl_days),
             log=args.log,
             allow_record=not args.no_record,
+            embedder=embedder,
         )
         server.run("stdio")
     return 0
@@ -100,6 +111,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serve.add_argument("--ttl-days", type=float, default=30.0, help="days a recorded trail stays valid")
     serve.add_argument("--log", type=Path, help="append one JSON line per tool call to this file")
+    serve.add_argument(
+        "--embed",
+        nargs="?",
+        const=DEFAULT_MODEL,
+        help=f"also match by embeddings (needs ragtrail[embed]); optional model, default {DEFAULT_MODEL}",
+    )
     serve.add_argument(
         "--no-record", action="store_true", help="serve recall only; the trail store stays fixed"
     )

@@ -20,6 +20,9 @@ ragtrail = "ragtrail.cli:main"
 mcp = [
     "mcp>=2.3",
 ]
+embed = [
+    "fastembed>=0.7",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.4,<0.14.0"]
@@ -51,5 +54,5 @@ addopts = "--doctest-modules"
 doctest_optionflags = ["ELLIPSIS"]
 
 [[tool.mypy.overrides]]
-module = ["subforest", "subforest.*"]
+module = ["subforest", "subforest.*", "fastembed", "fastembed.*"]
 ignore_missing_imports = true

@@ -62,7 +62,8 @@ class Trajectory(_Frozen):
     """The retrieval path of one accepted agent turn, scoped and with an expiry.
 
     `stale` is set by the store when every useful node changed; stale trajectories are kept
-    (for `get` and debugging) but never returned as candidates.
+    (for `get` and debugging) but never returned as candidates. `embedding` (with the `embed_model` that
+    produced it) is only set when an embedder was used at record time.
 
     >>> from datetime import datetime, timedelta, UTC
     >>> now = datetime(2026, 1, 1, tzinfo=UTC)
@@ -86,6 +87,8 @@ class Trajectory(_Frozen):
     expires_at: AwareDatetime
     hits: int = Field(default=0, ge=0)
     stale: bool = False
+    embedding: list[float] | None = None
+    embed_model: str | None = None
 
     @field_validator("id")
     @classmethod
@@ -130,3 +133,4 @@ class RecallResult(_Frozen):
     nodes: list[NodeRef] = Field(default_factory=list)
     stale: list[str] = Field(default_factory=list)
     rendered: str
+    matched_by: Literal["lexical", "embedding"] | None = None

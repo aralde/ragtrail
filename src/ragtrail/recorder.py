@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 from datetime import timedelta
 from typing import Any
 
+from ragtrail.embed import DEFAULT_EMBED_CONFIG, EmbedConfig, Embedder, embed_band_keys, normalize_vector
 from ragtrail.match import DEFAULT_CONFIG, MatchConfig, band_keys, normalize_query, signature
 from ragtrail.models import NodeRef, Outcome, Step, Trajectory
 from ragtrail.resolver import NodeResolver
@@ -45,6 +46,8 @@ class Recorder:
         config: MatchConfig = DEFAULT_CONFIG,
         ttl: timedelta = DEFAULT_TTL,
         clock: Clock = utc_now,
+        embedder: Embedder | None = None,
+        embed_config: EmbedConfig = DEFAULT_EMBED_CONFIG,
     ) -> None:
         if ttl <= timedelta(0):
             raise ValueError(f"ttl must be positive: {ttl}")
@@ -55,6 +58,8 @@ class Recorder:
         self.config = config
         self.ttl = ttl
         self.clock = clock
+        self.embedder = embedder
+        self.embed_config = embed_config
         self.steps: list[Step] = []
         self.cited: list[str] = []
         self.committed = False
@@ -88,6 +93,11 @@ class Recorder:
         if not useful:
             return None
         sig = signature(query_norm, self.config)
+        keys = band_keys(self.scope, sig, self.config)
+        vector = None
+        if self.embedder is not None:
+            vector = normalize_vector(self.embedder.embed([self.query])[0])
+            keys += embed_band_keys(self.scope, vector, self.embed_config)
         trajectory = Trajectory.expiring_in(
             self.ttl,
             now=self.clock(),
@@ -98,8 +108,10 @@ class Recorder:
             steps=self.steps,
             useful=useful,
             outcome=outcome,
+            embedding=vector,
+            embed_model=self.embedder.name if self.embedder else None,
         )
-        self.store.put(trajectory, band_keys(self.scope, sig, self.config))
+        self.store.put(trajectory, keys)
         return trajectory
 
     def _check_open(self) -> None:
