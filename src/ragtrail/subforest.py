@@ -6,6 +6,7 @@ Typed against the few `TreeStore` methods it uses, so this module does not impor
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Protocol
 
 from ragtrail.resolver import text_hash
@@ -28,7 +29,7 @@ class SubforestTree(Protocol):
     """The part of `subforest.TreeStore` this resolver needs."""
 
     def get_node(self, node_id: int) -> SubforestNode: ...
-    def ancestors(self, node_id: int) -> list[SubforestNode]: ...
+    def ancestors(self, node_id: int) -> Sequence[SubforestNode]: ...
     def doc_text(self, node_id: int) -> str | None: ...
 
 
