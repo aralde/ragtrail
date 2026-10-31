@@ -55,19 +55,28 @@ deletes expired trails.
 
 Summary and details: [`reports/README.md`](reports/README.md). Haiku agent and Sonnet judge through `claude -p`.
 
-**Repeat traffic** (the same question asked again in other words), all questions, cache off vs on:
+**Repeat traffic** (the same question asked again in other words), all questions, cache off vs on.
+
+The realistic run uses trails the agent recorded itself on WixQA (n = 200):
+
+- Tool calls: 3.4 → 2.1.
+- Input tokens: −33%.
+- Judged correct: 69.8% → 74.2% (+4.5, 95% CI −0.8 to +9.8): no accuracy loss.
+
+With oracle trails, which cite the gold evidence, the per-hit gains are larger. Treat them as an upper bound:
 
 | Dataset | n | Tool calls | Input tokens | Judged correct |
 |---|---|---|---|---|
-| WixQA help center | 200 | 3.4 → 2.2 | −28% | 69.8% → 86.2% (+16.5, 95% CI +11.5 to +21.2) |
-| QASPER papers | 400 | 4.1 → 1.5 | −57% | 60.8% → 71.6% (+10.9, 95% CI +7.2 to +14.4) |
+| WixQA help center | 200 | 3.4 → 2.2 | −28% | 69.8% → 86.2% |
+| QASPER papers | 400 | 4.1 → 1.5 | −57% | 60.8% → 71.6% |
 
-- With embeddings, 9 in 10 paraphrased help-center questions find their earlier path, and every match points at the
-  right article.
-- Put fixed context (document, product, customer) in `scope`. If a paper's title is part of the matched text, any
+- **Only record trails from answers you trust.** When the recorded answer was wrong, warm accuracy fell from 50% to
+  21% on those questions; when it was right, it rose from 79% to 87%.
+- **Put fixed context (document, product, customer) in `scope`.** If a paper's title is part of the matched text, any
   question about that paper looks similar and gets the wrong sections.
-- Questions that do not repeat get little from the cache. Paraphrases are model-written and warm-up trails are
-  oracle citations, so real traffic will repeat less cleanly.
+- **Savings come only from repeated questions.** Every test question here is a model-written repeat, so the cache
+  saves less on real traffic, where fewer questions repeat. Related work:
+  [`docs/related-work`](docs/related-work/README.md).
 
 Reproduce (needs subforest installed alongside and the `claude` CLI; add `--dataset qasper` for QASPER):
 
