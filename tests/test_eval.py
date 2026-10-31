@@ -224,3 +224,29 @@ def test_pairing_scoring_and_report(tmp_path: Path) -> None:
 def test_stats_helpers() -> None:
     assert bootstrap_ci([]) == (0.0, 0.0)
     assert wilson(0, 0) == (0.0, 0.0)
+
+
+def test_session_limit_message_is_a_usage_limit() -> None:
+    with pytest.raises(UsageLimitReached):
+        parse_output(
+            json.dumps({"is_error": True, "result": "You've hit your session limit · resets 11:10pm (UTC)"})
+        )
+
+
+def test_gold_sections_must_be_seen_directly() -> None:
+    from ragtrail.eval.report import score_run
+
+    q = EvalQuestion(id="q", split="s", question="?", answer="a", gold=["n12"])
+    doc_of = {"n12": "n10", "n11": "n10", "n10": "n10"}.get
+    run = {
+        "docs_calls": [
+            {"tool": "read", "args": {"node_id": "n11"}, "shown": [], "error": False, "blocked": False}
+        ],
+        "trail_calls": [],
+        "input_tokens": 1,
+        "seconds": 1.0,
+        "answer": "a",
+    }
+    assert not score_run(run, q, doc_of, None).gold_seen
+    run["trail_calls"] = [{"mode": "prefetch", "nodes": ["n12"]}]
+    assert score_run(run, q, doc_of, None).gold_seen

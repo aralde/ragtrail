@@ -40,28 +40,33 @@ class RunScore:
 
 
 def score_run(run: dict[str, Any], question: EvalQuestion, doc_of: DocOf, judge: float | None) -> RunScore:
-    """Score one run: a gold doc counts as seen if a read node, a search-shown chunk node (chunks view shows
-    text) or a prefetched node belongs to a gold document.
+    """Score one run. A gold *document* counts as seen if a read node, a search-shown chunk node (chunks view
+    shows text) or a prefetched node belongs to it; a gold *section* (QASPER evidence) only if that exact node
+    was read, shown or prefetched.
 
     >>> run = {"docs_calls": [{"tool": "read", "args": {"node_id": "n9"}, "shown": ["n9"], "error": False,
     ...        "blocked": False}], "trail_calls": [{"mode": "miss", "nodes": []}], "input_tokens": 10,
     ...        "seconds": 1.0, "answer": "Open settings"}
     >>> q = EvalQuestion(id="q", split="s", question="?", answer="Open settings", gold=["n7"])
-    >>> s = score_run(run, q, {"n9": "n7"}.get, None)
+    >>> s = score_run(run, q, {"n9": "n7", "n7": "n7"}.get, None)
     >>> s.calls, s.gold_seen, s.recall_mode
     (2, True, 'miss')
     """
-    gold = set(q for q in question.gold)
+    gold = set(question.gold)
     seen: set[str] = set()
+    raw: set[str] = set()
     for call in run["docs_calls"]:
         if call["error"] or call["blocked"]:
             continue
         ids = list(call["shown"])
         if call["tool"] == "read":
             ids.append(str(call["args"].get("node_id", "")))
-        seen |= {d for i in ids if (d := doc_of(i if i.startswith("n") else f"n{i}")) is not None}
+        ids = [i if i.startswith("n") else f"n{i}" for i in ids]
+        raw |= set(ids)
+        seen |= {d for i in ids if (d := doc_of(i)) is not None}
     for call in run["trail_calls"]:
         if call["mode"] == "prefetch":
+            raw |= set(call["nodes"])
             seen |= {d for i in call["nodes"] if (d := doc_of(i)) is not None}
     first = run["trail_calls"][0]["mode"] if run["trail_calls"] else "none"
     return RunScore(
@@ -69,7 +74,7 @@ def score_run(run: dict[str, Any], question: EvalQuestion, doc_of: DocOf, judge:
         docs_calls=len(run["docs_calls"]),
         input_tokens=int(run["input_tokens"]),
         seconds=float(run["seconds"]),
-        gold_seen=bool(seen & gold),
+        gold_seen=any(g in raw or (doc_of(g) == g and g in seen) for g in gold),
         f1=token_f1(run["answer"], question.answer),
         judge=judge,
         recall_mode=str(first),
