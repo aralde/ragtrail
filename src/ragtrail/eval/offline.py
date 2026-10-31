@@ -8,7 +8,7 @@ For each test question we record the recall mode and whether the recalled nodes 
 from __future__ import annotations
 
 import statistics
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -103,8 +103,12 @@ def recall_rows(
     budget_tokens: int,
     config: MatchConfig = DEFAULT_CONFIG,
     embedder: Embedder | None = None,
+    doc_of: Callable[[str], str | None] | None = None,
 ) -> list[RecallRow]:
-    """Run `recall` for every question and score whether the recalled nodes include a gold doc."""
+    """Run `recall` for every question and score whether the recalled nodes include a gold node.
+
+    With `doc_of`, a recalled section also counts when its document is a gold document (WixQA gold is
+    articles, while self-recorded trails cite sections)."""
     rows = []
     for q in questions:
         result = recall(
@@ -117,7 +121,7 @@ def recall_rows(
                 mode=result.mode,
                 similarity=result.similarity,
                 nodes=nodes,
-                gold_hit=bool(set(nodes) & set(q.gold)),
+                gold_hit=any(n in q.gold or (doc_of is not None and doc_of(n) in q.gold) for n in nodes),
                 rendered_tokens=estimate_tokens(result.rendered),
             )
         )

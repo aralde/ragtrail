@@ -250,3 +250,13 @@ def test_gold_sections_must_be_seen_directly() -> None:
     assert not score_run(run, q, doc_of, None).gold_seen
     run["trail_calls"] = [{"mode": "prefetch", "nodes": ["n12"]}]
     assert score_run(run, q, doc_of, None).gold_seen
+
+
+def test_recall_rows_maps_sections_to_gold_docs() -> None:
+    store = SQLiteStore(":memory:")
+    resolver = Corpus().resolver()
+    warm_up(store, resolver, [q("w1", "How do I reset my password?", ["n70"])], "eval")
+    test = [q("t1", "How do I reset my password?", ["doc7"])]
+    assert not recall_rows(store, resolver, test, "eval", budget_tokens=500)[0].gold_hit
+    rows = recall_rows(store, resolver, test, "eval", budget_tokens=500, doc_of={"n70": "doc7"}.get)
+    assert rows[0].gold_hit

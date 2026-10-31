@@ -214,7 +214,13 @@ def cmd_offline(args: argparse.Namespace) -> int:  # pragma: no cover - needs su
     )  # recall bumps hit counters; score on a copy so the warm store stays as built
     with TreeStore(corpus_path(args.data, args.dataset)) as tree, SQLiteStore(scratch) as store:
         rows = recall_rows(
-            store, SubforestResolver(tree), test, "eval", budget_tokens=args.budget, embedder=embedder
+            store,
+            SubforestResolver(tree),
+            test,
+            "eval",
+            budget_tokens=args.budget,
+            embedder=embedder,
+            doc_of=_doc_of(corpus_path(args.data, args.dataset)),
         )
     scratch.unlink()
     dev = None
