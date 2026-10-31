@@ -51,30 +51,25 @@ Other MCP clients (Claude Desktop, Cursor, …) use the same command in their JS
 Run it next to your retrieval tools (for example subforest's own MCP server). `ragtrail purge --db trails.db`
 deletes expired trails.
 
-## Evaluation (WixQA, early)
+## Evaluation
 
-Full report: [`reports/wixqa-eval.md`](reports/wixqa-eval.md). Small Haiku pilots through `claude -p`, so treat the
-numbers as directional.
+Summary and details: [`reports/README.md`](reports/README.md). Haiku agent and Sonnet judge through `claude -p`.
 
-| Scenario, matcher | Test questions matched | Matches pointing at a gold article | Agent pilot: warm vs cold |
-|---|---|---|---|
-| Repeat traffic, lexical | 25/200 | 100% | −0.7 tool calls, −23% input tokens, judge 73% → 88% (n = 30) |
-| Repeat traffic, **+ embeddings** | **179/200** | **100%** | **−1.2 tool calls (−39%), −30% input tokens, judge 78% → 90%** (n = 30) |
-| Disjoint questions, lexical | 11/200 | 36% | no measurable effect (n = 20) |
-| Disjoint questions, + embeddings | 55/200 | 47% | no measurable effect; judge 75% → 75% (n = 20) |
+**Repeat traffic** (the same question asked again in other words), all questions, cache off vs on:
 
-- **Repeat traffic** means the same question asked again in other words: warm-up on WixQA-ExpertWritten, test on
-  one Haiku paraphrase of each. **Disjoint** uses different WixQA splits for warm-up and test, which barely
-  repeat each other.
-- With embeddings, a paraphrased question finds its earlier path 9 times in 10. On the questions in the pilot,
-  the warm agent needs about a third fewer calls, and judged accuracy does not drop (+11.7 points, 95% CI 0 to
-  +23).
-- On disjoint questions the cache rarely fires, and its wrong hints did not lower judged accuracy in the pilot,
-  but the CI is wide (±17.5 points).
-- **Limits.** Pilots are small and stratified (they over-sample cache hits), the judge is the same small model,
-  and warm-up trails are oracle citations.
+| Dataset | n | Tool calls | Input tokens | Judged correct |
+|---|---|---|---|---|
+| WixQA help center | 200 | 3.4 → 2.2 | −28% | 69.8% → 86.2% (+16.5, 95% CI +11.5 to +21.2) |
+| QASPER papers | 400 | 4.1 → 1.5 | −57% | 60.8% → 71.6% (+10.9, 95% CI +7.2 to +14.4) |
 
-Reproduce (needs subforest installed alongside and the `claude` CLI):
+- With embeddings, 9 in 10 paraphrased help-center questions find their earlier path, and every match points at the
+  right article.
+- Put fixed context (document, product, customer) in `scope`. If a paper's title is part of the matched text, any
+  question about that paper looks similar and gets the wrong sections.
+- Questions that do not repeat get little from the cache. Paraphrases are model-written and warm-up trails are
+  oracle citations, so real traffic will repeat less cleanly.
+
+Reproduce (needs subforest installed alongside and the `claude` CLI; add `--dataset qasper` for QASPER):
 
 ```bash
 ragtrail eval fetch
