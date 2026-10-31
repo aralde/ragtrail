@@ -38,6 +38,11 @@ Start by calling `recall` with the user's question copied verbatim (not rephrase
 Use at most {max_calls} tool calls in total. Base the answer on what you read, and say so if the docs do not
 cover it. Give a concise answer in plain text."""
 
+RECORD_STEP = """
+After you have the answer, and only if it is grounded in the docs you read, call `record` once with the user's
+question verbatim, `cited` = the node ids (like "n123") your answer relies on, and outcome "accepted".
+Then give the answer."""
+
 _NODE = re.compile(r"\[n(\d+)\]")
 
 
@@ -50,6 +55,7 @@ class AgentConfig:
     docs_budget: int = 800
     recall_budget: int = 2000
     embed: str | None = None
+    allow_record: bool = False
     corpus_name: str = "the Wix help center"
     claude: str = "claude"
     python: str = sys.executable
@@ -66,7 +72,9 @@ def mcp_config(config: AgentConfig, corpus: Path, trails: Path, work: Path) -> d
     docs += ["--budget", str(config.docs_budget), "--max-calls", str(config.max_calls)]
     docs += ["--log", str(work / "docs.jsonl")]
     trail = ["-m", "ragtrail.cli", "serve", "--db", str(trails), "--scope", SCOPE, "--subforest", str(corpus)]
-    trail += ["--budget", str(config.recall_budget), "--no-record", "--log", str(work / "trails.jsonl")]
+    trail += ["--budget", str(config.recall_budget), "--log", str(work / "trails.jsonl")]
+    if not config.allow_record:
+        trail.append("--no-record")
     if config.embed:
         trail += ["--embed", config.embed]
     return {
@@ -98,7 +106,8 @@ def claude_command(config: AgentConfig, mcp_path: Path, question: str) -> list[s
         "--allowedTools",
         "mcp__docs,mcp__trails",
         "--system-prompt",
-        SYSTEM_PROMPT.format(corpus=config.corpus_name, max_calls=config.max_calls),
+        SYSTEM_PROMPT.format(corpus=config.corpus_name, max_calls=config.max_calls)
+        + (RECORD_STEP if config.allow_record else ""),
         "--output-format",
         "json",
         "--no-session-persistence",
@@ -167,6 +176,12 @@ def run_one(
                 "similarity": c.get("similarity"),
             }
             for c in trails_log
+            if c.get("tool", "recall") == "recall"
+        ],
+        "records": [
+            {**c.get("args", {}), "recorded": c.get("recorded", False), "nodes": c.get("nodes", [])}
+            for c in trails_log
+            if c.get("tool") == "record"
         ],
     }
 
@@ -198,7 +213,7 @@ def load_runs(path: Path) -> list[dict[str, Any]]:
 
 
 def pending(
-    questions: Sequence[EvalQuestion], done: Iterable[dict[str, Any]]
+    questions: Sequence[EvalQuestion], done: Iterable[dict[str, Any]], arms: Sequence[Arm] = ARMS
 ) -> list[tuple[EvalQuestion, Arm]]:
     """(question, arm) pairs without an `ok` record, arms interleaved so a partial run stays paired.
 
@@ -207,7 +222,7 @@ def pending(
     [('a', 'warm'), ('b', 'cold'), ('b', 'warm')]
     """
     finished = {(r["id"], r["arm"]) for r in done if r["status"] == "ok"}
-    return [(q, a) for q in questions for a in ARMS if (q.id, a) not in finished]
+    return [(q, a) for q in questions for a in arms if (q.id, a) not in finished]
 
 
 def run_agent(
@@ -219,12 +234,13 @@ def run_agent(
     warm_db: Path,
     config: AgentConfig,
     max_runs: int | None = None,
+    arms: Sequence[Arm] = ARMS,
     invoke: Invoke = run_claude,
     echo: Callable[[str], None] = print,
 ) -> int:
     """Run pending pairs, appending to `runs_path`; stops early (no error) at the usage limit."""
     runs_path.parent.mkdir(parents=True, exist_ok=True)
-    todo = pending(questions, load_runs(runs_path))[:max_runs]
+    todo = pending(questions, load_runs(runs_path), arms)[:max_runs]
     for i, (question, arm) in enumerate(todo, 1):
         try:
             record = run_one(question, arm, scenario, corpus, warm_db, config, invoke)

@@ -40,6 +40,8 @@ class Scenario:
     test: str
     dev: tuple[str, str] | None
     matched_first: bool
+    trails: str = "oracle"
+    cold_from: str | None = None
 
 
 SCENARIOS = {
@@ -64,6 +66,20 @@ SCENARIOS = {
         PARAPHRASE_SPLIT,
         None,
         True,
+    ),
+    ("wixqa", "repeat-self"): Scenario(
+        "wixqa",
+        "repeat-self",
+        "Repeat traffic without oracle: the agent first answers WixQA-ExpertWritten with an empty cache "
+        "and calls `record` with the nodes it chose to cite (phase A); those self-recorded trails warm the "
+        "cache; test on the same paraphrases as `repeat`. The cold arm is reused from `repeat` (identical "
+        "condition).",
+        (TEST_SPLIT,),
+        PARAPHRASE_SPLIT,
+        None,
+        True,
+        trails="self",
+        cold_from="repeat",
     ),
     ("qasper", "repeat"): Scenario(
         "qasper",
@@ -183,7 +199,15 @@ def cmd_offline(args: argparse.Namespace) -> int:  # pragma: no cover - needs su
     db = _dir(args) / f"trails-{_run(args, sc)}.db"
     db.unlink(missing_ok=True)
     with TreeStore(corpus_path(args.data, args.dataset)) as tree, SQLiteStore(db) as store:
-        admitted = warm_up(store, SubforestResolver(tree), warm, "eval", embedder=embedder)
+        if sc.trails == "self":
+            from ragtrail.eval.agent import load_runs
+            from ragtrail.eval.offline import warm_from_records
+
+            phase_a = load_runs(_dir(args) / f"runs-{_run(args, sc)}-phaseA.jsonl")
+            records = [r for run in phase_a if run["status"] == "ok" for r in run.get("records", [])]
+            admitted = warm_from_records(store, SubforestResolver(tree), records, "eval", embedder=embedder)
+        else:
+            admitted = warm_up(store, SubforestResolver(tree), warm, "eval", embedder=embedder)
     scratch = db.with_suffix(".scoring.db")
     shutil.copyfile(
         db, scratch
@@ -243,6 +267,35 @@ def cmd_agent(args: argparse.Namespace) -> int:  # pragma: no cover - needs the 
         warm_db=(_dir(args) / f"trails-{_run(args, sc)}.db").resolve(),
         config=config,
         max_runs=args.max_runs,
+        arms=("warm",) if sc.cold_from else ("cold", "warm"),
+    )
+    return 0
+
+
+def cmd_selfrecord(args: argparse.Namespace) -> int:  # pragma: no cover - needs the claude CLI
+    """Phase A of a self-trail scenario: answer the warm questions with an empty cache and let the agent
+    record its own trails."""
+    from ragtrail.eval.agent import AgentConfig, run_agent
+
+    sc = _scenario(args)
+    if sc.trails != "self":
+        raise SystemExit(f"error: scenario {sc.name!r} uses oracle trails; nothing to self-record")
+    config = AgentConfig(
+        model=args.model,
+        max_calls=args.max_calls,
+        embed=args.embed,
+        corpus_name=CORPUS_NAMES[args.dataset],
+        allow_record=True,
+    )
+    run_agent(
+        _questions(args, sc.warm),
+        _dir(args) / f"runs-{_run(args, sc)}-phaseA.jsonl",
+        scenario=f"{_run(args, sc)}-phaseA",
+        corpus=corpus_path(args.data, args.dataset).resolve(),
+        warm_db=Path("/nonexistent"),
+        config=config,
+        max_runs=args.max_runs,
+        arms=("cold",),
     )
     return 0
 
@@ -253,12 +306,13 @@ def cmd_judge(args: argparse.Namespace) -> int:  # pragma: no cover - needs the 
     from ragtrail.eval.report import judge_key
 
     sc = _scenario(args)
-    by_id = {q.id: q for q in _questions(args, sc.test)}
-    path = _dir(args) / f"judgments-{_run(args, sc)}.{args.model}.json"
+    run_name = _run(args, sc) + ("-phaseA" if args.phase_a else "")
+    by_id = {q.id: q for q in _questions(args, sc.warm if args.phase_a else sc.test)}
+    path = _dir(args) / f"judgments-{run_name}.{args.model}.json"
     verdicts: dict[str, str] = json.loads(path.read_text()) if path.exists() else {}
     items = []
-    for run in load_runs(_dir(args) / f"runs-{_run(args, sc)}.jsonl"):
-        key = judge_key(_run(args, sc), run["id"], run["arm"])
+    for run in load_runs(_dir(args) / f"runs-{run_name}.jsonl"):
+        key = judge_key(run_name, run["id"], run["arm"])
         if run["status"] != "ok" or key in verdicts:
             continue
         q = by_id[run["id"]]
@@ -304,7 +358,16 @@ def cmd_report(args: argparse.Namespace) -> int:  # pragma: no cover - needs sub
             if runs:
                 jpath = _dir(args) / f"judgments-{run}.{args.judge}.json"
                 verdicts = json.loads(jpath.read_text()) if jpath.exists() else {}
-                paired = pair_runs(run, runs, _questions(args, sc.test), doc_of, verdicts)
+                keys = None
+                if sc.cold_from:
+                    cold_run = sc.cold_from + suffix
+                    runs = [r for r in runs if r["arm"] != "cold"] + [
+                        r for r in load_runs(_dir(args) / f"runs-{cold_run}.jsonl") if r["arm"] == "cold"
+                    ]
+                    cpath = _dir(args) / f"judgments-{cold_run}.{args.judge}.json"
+                    verdicts = {**(json.loads(cpath.read_text()) if cpath.exists() else {}), **verdicts}
+                    keys = {"cold": cold_run}
+                paired = pair_runs(run, runs, _questions(args, sc.test), doc_of, verdicts, keys)
                 models = ", ".join(sorted({r["model"] for r in runs}))
                 parts += [f"### Agent runs ({name}, {matcher})", "", agent_markdown(paired, models)]
     text = "\n".join(parts)
@@ -339,10 +402,20 @@ def add_eval_parser(sub: Any) -> None:
     a.add_argument("--model", default="haiku")
     a.add_argument("--embed", nargs="?", const=DEFAULT_MODEL, help="warm arm also matches by embeddings")
     a.set_defaults(func=cmd_agent)
+    sr = cmds.add_parser(
+        "selfrecord", help="phase A: the agent answers warm questions and records its trails"
+    )
+    sr.add_argument("--scenario", default="repeat-self")
+    sr.add_argument("--max-runs", type=int, help="stop after this many runs (resume later)")
+    sr.add_argument("--max-calls", type=int, default=10)
+    sr.add_argument("--model", default="haiku")
+    sr.add_argument("--embed", nargs="?", const=DEFAULT_MODEL, help="same server flags as the warm runs")
+    sr.set_defaults(func=cmd_selfrecord)
     j = cmds.add_parser("judge", help="grade pilot answers against references (claude -p)")
     j.add_argument("--scenario", choices=sorted({name for _, name in SCENARIOS}), required=True)
     j.add_argument("--model", default="sonnet", help="judge model")
     j.add_argument("--embed", nargs="?", const=DEFAULT_MODEL, help="judge the embeddings variant")
+    j.add_argument("--phase-a", action="store_true", help="judge the self-record phase A answers")
     j.set_defaults(func=cmd_judge)
     r = cmds.add_parser("report", help="write the Markdown report")
     r.add_argument("--out", type=Path, help="default reports/<dataset>-eval.md")

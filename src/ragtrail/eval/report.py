@@ -95,8 +95,13 @@ def pair_runs(
     questions: Sequence[EvalQuestion],
     doc_of: DocOf,
     verdicts: dict[str, str],
+    key_scenarios: dict[str, str] | None = None,
 ) -> Paired:
-    """Keep questions with an `ok` run in both arms and score them."""
+    """Keep questions with an `ok` run in both arms and score them.
+
+    `key_scenarios` maps an arm to the run name its verdicts were judged under (when one arm is reused from
+    another run); by default both arms use `scenario`.
+    """
     ok = {(r["id"], r["arm"]): r for r in runs if r["status"] == "ok"}
     paired = Paired()
     for q in questions:
@@ -104,7 +109,7 @@ def pair_runs(
             continue
         paired.ids.append(q.id)
         for arm in ARMS:
-            verdict = verdicts.get(judge_key(scenario, q.id, arm))
+            verdict = verdicts.get(judge_key((key_scenarios or {}).get(arm, scenario), q.id, arm))
             score = SCORES[verdict] if verdict is not None else None
             paired.arms[arm].append(score_run(ok[(q.id, arm)], q, doc_of, score))
     return paired

@@ -10,6 +10,7 @@ from __future__ import annotations
 import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from ragtrail.embed import DEFAULT_EMBED_CONFIG, Embedder
 from ragtrail.eval.data import EvalQuestion
@@ -47,6 +48,37 @@ def warm_up(
         rec.step("oracle", {"question_id": q.id}, q.gold)
         rec.cite(q.gold)
         admitted += rec.commit("verified") is not None
+    return admitted
+
+
+def warm_from_records(
+    store: TrajectoryStore,
+    resolver: NodeResolver,
+    records: Sequence[dict[str, Any]],
+    scope: str,
+    config: MatchConfig = DEFAULT_CONFIG,
+    embedder: Embedder | None = None,
+) -> int:
+    """Replay `record` calls an agent made (query, cited, outcome, steps) into `store`; return how many were
+    admitted. This builds a warm store from the agent's own citations instead of oracle gold.
+
+    >>> from ragtrail.store import SQLiteStore
+    >>> from ragtrail.resolver import GenericResolver
+    >>> r = GenericResolver(lambda i: "h" if i == "n5" else None, lambda i, n: "text")
+    >>> recs = [{"query": "How do I add a domain?", "cited": ["n5"], "outcome": "accepted"},
+    ...         {"query": "Other?", "cited": ["gone"], "outcome": "accepted"}]
+    >>> warm_from_records(SQLiteStore(":memory:"), r, recs, "eval")
+    1
+    """
+    admitted = 0
+    for record in records:
+        rec = Recorder(
+            store, resolver, scope, str(record.get("query") or ""), config=config, embedder=embedder
+        )
+        for step in record.get("steps") or []:
+            rec.step(str(step.get("tool", "")), step.get("args") or {}, step.get("returned") or [])
+        rec.cite(str(c) for c in record.get("cited") or [])
+        admitted += rec.commit(record.get("outcome") or "accepted") is not None
     return admitted
 
 
