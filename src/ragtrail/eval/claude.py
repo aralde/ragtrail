@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 
 _LIMIT = re.compile(
-    r"usage limit|rate limit|limit reached|limit will reset|out of extra usage", re.IGNORECASE
+    r"usage limit|session limit|rate limit|limit reached|limit will reset|resets \d|out of extra usage",
+    re.IGNORECASE,
 )
 
 Invoke = Callable[[list[str], Path], str]

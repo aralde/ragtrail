@@ -224,3 +224,10 @@ def test_pairing_scoring_and_report(tmp_path: Path) -> None:
 def test_stats_helpers() -> None:
     assert bootstrap_ci([]) == (0.0, 0.0)
     assert wilson(0, 0) == (0.0, 0.0)
+
+
+def test_session_limit_message_is_a_usage_limit() -> None:
+    with pytest.raises(UsageLimitReached):
+        parse_output(
+            json.dumps({"is_error": True, "result": "You've hit your session limit · resets 11:10pm (UTC)"})
+        )
