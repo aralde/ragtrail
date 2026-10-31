@@ -8,8 +8,9 @@ For each test question we record the recall mode and whether the recalled nodes 
 from __future__ import annotations
 
 import statistics
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from ragtrail.embed import DEFAULT_EMBED_CONFIG, Embedder
 from ragtrail.eval.data import EvalQuestion
@@ -50,6 +51,37 @@ def warm_up(
     return admitted
 
 
+def warm_from_records(
+    store: TrajectoryStore,
+    resolver: NodeResolver,
+    records: Sequence[dict[str, Any]],
+    scope: str,
+    config: MatchConfig = DEFAULT_CONFIG,
+    embedder: Embedder | None = None,
+) -> int:
+    """Replay `record` calls an agent made (query, cited, outcome, steps) into `store`; return how many were
+    admitted. This builds a warm store from the agent's own citations instead of oracle gold.
+
+    >>> from ragtrail.store import SQLiteStore
+    >>> from ragtrail.resolver import GenericResolver
+    >>> r = GenericResolver(lambda i: "h" if i == "n5" else None, lambda i, n: "text")
+    >>> recs = [{"query": "How do I add a domain?", "cited": ["n5"], "outcome": "accepted"},
+    ...         {"query": "Other?", "cited": ["gone"], "outcome": "accepted"}]
+    >>> warm_from_records(SQLiteStore(":memory:"), r, recs, "eval")
+    1
+    """
+    admitted = 0
+    for record in records:
+        rec = Recorder(
+            store, resolver, scope, str(record.get("query") or ""), config=config, embedder=embedder
+        )
+        for step in record.get("steps") or []:
+            rec.step(str(step.get("tool", "")), step.get("args") or {}, step.get("returned") or [])
+        rec.cite(str(c) for c in record.get("cited") or [])
+        admitted += rec.commit(record.get("outcome") or "accepted") is not None
+    return admitted
+
+
 @dataclass(frozen=True)
 class RecallRow:
     """What recall returned for one test question."""
@@ -71,8 +103,12 @@ def recall_rows(
     budget_tokens: int,
     config: MatchConfig = DEFAULT_CONFIG,
     embedder: Embedder | None = None,
+    doc_of: Callable[[str], str | None] | None = None,
 ) -> list[RecallRow]:
-    """Run `recall` for every question and score whether the recalled nodes include a gold doc."""
+    """Run `recall` for every question and score whether the recalled nodes include a gold node.
+
+    With `doc_of`, a recalled section also counts when its document is a gold document (WixQA gold is
+    articles, while self-recorded trails cite sections)."""
     rows = []
     for q in questions:
         result = recall(
@@ -85,7 +121,7 @@ def recall_rows(
                 mode=result.mode,
                 similarity=result.similarity,
                 nodes=nodes,
-                gold_hit=bool(set(nodes) & set(q.gold)),
+                gold_hit=any(n in q.gold or (doc_of is not None and doc_of(n) in q.gold) for n in nodes),
                 rendered_tokens=estimate_tokens(result.rendered),
             )
         )

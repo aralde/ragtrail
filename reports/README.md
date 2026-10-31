@@ -20,12 +20,39 @@ Haiku paraphrase of each. Both arms use the same model, tools, prompt and call c
 - Judge check: on 40 random WixQA answers labelled blind in-session (by the session model, not a human),
   Sonnet agreed exactly on 32 and within one grade on all 40; it is slightly stricter.
 
+## Without oracle: trails the agent recorded itself (WixQA, n = 200)
+
+Phase A: the agent answers the 200 original questions with an empty cache and calls `record` with the nodes it
+chose to cite (it self-approves every answer: no external signal). Phase B: the paraphrases run against that cache.
+The cold arm is the same as above.
+
+| | Cold | Warm, self-recorded trails | Δ (95% CI) |
+|---|---|---|---|
+| Tool calls | 3.40 | 2.08 | −1.31 (−1.55 to −1.07) |
+| Input tokens | 15.0k | 10.0k | −33% |
+| Judged correct | 69.8% | 74.2% | +4.5 (−0.8 to +9.8), sign test p = 0.10 |
+
+- Savings hold without oracle trails; accuracy does not drop (the gain is not significant).
+- Self-recorded trails are worse evidence: 135/200 cite a gold article (oracle: 200/200), and 69% of recalled paths
+  hold one.
+- **Wrong trails propagate errors.** Split by how the phase-A answer was judged:
+
+| Phase-A answer | n | Cold | Warm |
+|---|---|---|---|
+| correct | 117 | 79% | 87% |
+| partial | 62 | 60% | 69% |
+| incorrect | 21 | 50% | **21%** |
+
+  The admission rule (record only with a positive outcome signal) is what makes the cache safe; here every answer
+  was self-approved. The oracle results above are an upper bound on the per-hit benefit.
+
 ## How often the cache fires (offline, no LLM)
 
 | Setting | Recall fires | Recalled nodes hold the gold |
 |---|---|---|
 | WixQA repeat, lexical only | 25/200 | 100% |
 | WixQA repeat, + embeddings | 179/200 | 100% |
+| WixQA repeat, + embeddings, self-recorded trails | 178/200 | 69% |
 | QASPER repeat, paper as scope, + embeddings | 274/400 | 100% |
 | QASPER, *other* question on a cached paper, paper as scope | 13/880 | 9 of 13 |
 | QASPER, *other* question on a cached paper, title inside the query | 855/880 | 30% |
@@ -38,9 +65,11 @@ Haiku paraphrase of each. Both arms use the same model, tools, prompt and call c
 
 ## Limits
 
-- Paraphrases are model-written, and warm-up trails are oracle citations; real traffic repeats less cleanly.
+- Paraphrases are model-written, and every test question is a repeat; real traffic repeats far less (search logs:
+  30–40%), so savings apply per hit. The oracle runs overstate accuracy; the self-recorded run is the realistic one.
+- The judge (Sonnet) is in the same family as the agent and was checked on only 40 labels.
 - Disjoint questions (different WixQA splits) barely repeat; the 20-question pilots there showed no accuracy change
   but have wide CIs (see `wixqa-eval.md`).
 - No comparison against other methods (answer caching, better retrieval); only cache on vs off.
 
-Files: [wixqa-eval.md](wixqa-eval.md), [qasper-eval.md](qasper-eval.md).
+Files: [wixqa-eval.md](wixqa-eval.md), [qasper-eval.md](qasper-eval.md). Related work: [docs/related-work](../docs/related-work/README.md).

@@ -175,3 +175,42 @@ By warm recall mode:
 | prefetch | 110 | 3.3 → 1.4 | 14,543 → 8,889 | 70% → 89% |
 | hint | 69 | 3.6 → 3.3 | 15,706 → 13,284 | 72% → 86% |
 | miss | 21 | 3.3 → 2.9 | 15,022 → 12,953 | 60% → 71% |
+
+## Scenario: repeat-self — lexical + embeddings
+
+Repeat traffic without oracle: the agent first answers WixQA-ExpertWritten with an empty cache and calls `record` with the nodes it chose to cite (phase A); those self-recorded trails warm the cache; test on the same paraphrases as `repeat`. The cold arm is reused from `repeat` (identical condition).
+
+- Warm-up questions: 200 (198 trails admitted)
+- Test questions: 200; exact normalized duplicates of a warm-up question: 0
+- Thresholds: hint ≥ 0.4, prefetch ≥ 0.5; LSH 42x3; recall budget 2000 tokens
+- Embedding matcher: BAAI/bge-small-en-v1.5 (cosine hint ≥ 0.88, prefetch ≥ 0.92; SimHash 30x16)
+
+| Mode | Questions | Share | Recalled nodes include gold (95% CI) | Mean similarity | Mean recall tokens |
+|---|---|---|---|---|---|
+| prefetch | 132 | 66% | 92/132 = 70% (61% to 77%) | 0.95 | 983 |
+| hint | 46 | 23% | 30/46 = 65% (51% to 77%) | 0.89 | 134 |
+| miss | 22 | 11% | — | 0.83 | 0 |
+
+### Agent runs (repeat-self, lexical + embeddings)
+
+200 questions answered in both arms by `haiku` through `claude -p`; same tools, prompt and call cap.
+
+| Metric | cold | warm | Δ warm - cold | 95% CI |
+|---|---|---|---|---|
+| Tool calls (incl. recall) | 3.40 | 2.08 | -1.31 | -1.55 to -1.07 |
+| Docs tool calls | 2.40 | 1.08 | -1.31 | -1.55 to -1.07 |
+| Input tokens | 14,995 | 9,974 | -5,020 | -5,877 to -4,206 |
+| Seconds | 12.1 | 10.7 | -1.3 | -1.7 to -0.9 |
+| Saw a gold doc | 72.0% | 70.5% | -1.5% | -7.5% to +4.5% |
+| Answer token F1 | 0.354 | 0.372 | +0.019 | +0.006 to +0.031 |
+| Judge accuracy (n=200) | 69.8% | 74.2% | +4.5% | -0.8% to +9.8% |
+
+Judge: warm better on 44, cold better on 29; sign test p = 0.101.
+
+By warm recall mode:
+
+| Warm recall | Questions | Calls cold → warm | Input tokens cold → warm | Judge cold → warm |
+|---|---|---|---|---|
+| prefetch | 132 | 3.4 → 1.3 | 14,809 → 8,371 | 70% → 76% |
+| hint | 46 | 3.5 → 3.8 | 15,433 → 12,308 | 72% → 75% |
+| miss | 22 | 3.3 → 3.3 | 15,192 → 14,714 | 61% → 64% |
