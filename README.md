@@ -91,6 +91,12 @@ ragtrail eval judge --scenario repeat [--embed]
 ragtrail eval report
 ```
 
+## Demos
+
+`uv run python examples/demos.py` runs six small offline cases, no API needed: paraphrase reuse, an edited source
+(ragtrail drops it; a copy cache serves the old text), a deleted source, the fixed-context false match and its scope
+fix, tenant isolation, and admission gating. Pass a name (`freshness`, `fixed-context`, ...) to run one.
+
 ## Development
 
 ```bash
