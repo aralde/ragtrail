@@ -144,17 +144,20 @@ def _rows(args: argparse.Namespace, run: str) -> list[RecallRow]:
     return [RecallRow(**{**r, "nodes": tuple(r["nodes"])}) for r in data["rows"]]
 
 
-def _phase_a_name(args: argparse.Namespace, sc: Scenario) -> str:
+def _phase_a_name(args: argparse.Namespace, sc: Scenario, embed: bool | None = None) -> str:
     """Run name of the phase A a self-trail scenario records (or reuses)."""
-    return (sc.phase_a_from or sc.name) + ("-embed" if getattr(args, "embed", None) else "") + "-phaseA"
+    embed = bool(getattr(args, "embed", None)) if embed is None else embed
+    return (sc.phase_a_from or sc.name) + ("-embed" if embed else "") + "-phaseA"
 
 
-def _phase_a_verdicts(args: argparse.Namespace, sc: Scenario, judge: str) -> dict[str, str]:
+def _phase_a_verdicts(
+    args: argparse.Namespace, sc: Scenario, judge: str, embed: bool | None = None
+) -> dict[str, str]:
     """Question id → how its phase-A answer was judged (empty if not judged yet)."""
     from ragtrail.eval.agent import load_runs
     from ragtrail.eval.report import judge_key
 
-    name = _phase_a_name(args, sc)
+    name = _phase_a_name(args, sc, embed)
     path = _dir(args) / f"judgments-{name}.{judge}.json"
     if not path.exists():
         return {}
@@ -423,8 +426,13 @@ def cmd_report(args: argparse.Namespace) -> int:  # pragma: no cover - needs sub
                 paired = pair_runs(run, runs, _questions(args, sc.test), doc_of, verdicts, keys)
                 models = ", ".join(sorted({r["model"] for r in runs}))
                 parts += [f"### Agent runs ({name}, {matcher})", "", agent_markdown(paired, models)]
-                phase_a = _phase_a_verdicts(args, sc, args.judge) if sc.trails == "self" else {}
+                phase_a = (
+                    _phase_a_verdicts(args, sc, args.judge, embed=bool(suffix)) if sc.trails == "self" else {}
+                )
                 if phase_a:
+                    phase_a = {
+                        q.id: v for q in _questions(args, sc.test) if (v := phase_a.get(q.source_id or q.id))
+                    }
                     parts += [
                         "By how the phase-A answer that recorded the trail was judged:",
                         "",

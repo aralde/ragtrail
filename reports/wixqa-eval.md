@@ -214,3 +214,58 @@ By warm recall mode:
 | prefetch | 132 | 3.4 → 1.3 | 14,809 → 8,371 | 70% → 76% |
 | hint | 46 | 3.5 → 3.8 | 15,433 → 12,308 | 72% → 75% |
 | miss | 22 | 3.3 → 3.3 | 15,192 → 14,714 | 61% → 64% |
+
+By how the phase-A answer that recorded the trail was judged:
+
+| Phase-A answer | Questions | Calls cold → warm | Judge cold → warm |
+|---|---|---|---|
+| correct | 117 | 3.1 → 1.9 | 79% → 87% |
+| incorrect | 21 | 4.2 → 2.9 | 50% → 21% |
+| partial | 62 | 3.6 → 2.1 | 60% → 69% |
+
+## Scenario: repeat-gated — lexical + embeddings
+
+Like `repeat-self`, but a trail is admitted only when its phase-A answer was judged correct (a stand-in for explicit user feedback; the judge sees the reference answer). Phase A and the cold arm are reused from `repeat-self` and `repeat`.
+
+- Warm-up questions: 200 (116 trails admitted)
+- Test questions: 200; exact normalized duplicates of a warm-up question: 0
+- Thresholds: hint ≥ 0.4, prefetch ≥ 0.5; LSH 42x3; recall budget 2000 tokens
+- Embedding matcher: BAAI/bge-small-en-v1.5 (cosine hint ≥ 0.88, prefetch ≥ 0.92; SimHash 30x16)
+
+| Mode | Questions | Share | Recalled nodes include gold (95% CI) | Mean similarity | Mean recall tokens |
+|---|---|---|---|---|---|
+| prefetch | 80 | 40% | 64/80 = 80% (70% to 87%) | 0.95 | 927 |
+| hint | 35 | 18% | 26/35 = 74% (58% to 86%) | 0.90 | 127 |
+| miss | 85 | 42% | — | 0.75 | 0 |
+
+### Agent runs (repeat-gated, lexical + embeddings)
+
+200 questions answered in both arms by `haiku` through `claude -p`; same tools, prompt and call cap.
+
+| Metric | cold | warm | Δ warm - cold | 95% CI |
+|---|---|---|---|---|
+| Tool calls (incl. recall) | 3.40 | 2.52 | -0.87 | -1.07 to -0.67 |
+| Docs tool calls | 2.40 | 1.52 | -0.87 | -1.07 to -0.67 |
+| Input tokens | 14,995 | 11,646 | -3,349 | -4,133 to -2,562 |
+| Seconds | 12.1 | 11.3 | -0.8 | -1.2 to -0.4 |
+| Saw a gold doc | 72.0% | 71.5% | -0.5% | -6.0% to +5.0% |
+| Answer token F1 | 0.354 | 0.373 | +0.020 | +0.007 to +0.033 |
+| Judge accuracy (n=200) | 69.8% | 75.5% | +5.8% | +1.0% to +10.8% |
+
+Judge: warm better on 41, cold better on 26; sign test p = 0.086.
+
+By warm recall mode:
+
+| Warm recall | Questions | Calls cold → warm | Input tokens cold → warm | Judge cold → warm |
+|---|---|---|---|---|
+| prefetch | 80 | 3.1 → 1.2 | 13,597 → 7,699 | 79% → 91% |
+| hint | 35 | 3.3 → 3.2 | 14,543 → 11,005 | 76% → 89% |
+| miss | 85 | 3.7 → 3.5 | 16,497 → 15,624 | 58% → 55% |
+
+By how the phase-A answer that recorded the trail was judged:
+
+| Phase-A answer | Questions | Calls cold → warm | Judge cold → warm |
+|---|---|---|---|
+| correct | 117 | 3.1 → 1.8 | 79% → 91% |
+| incorrect | 21 | 4.2 → 3.8 | 50% → 40% |
+| partial | 62 | 3.6 → 3.5 | 60% → 59% |
