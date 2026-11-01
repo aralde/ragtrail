@@ -183,3 +183,28 @@ def agent_markdown(paired: Paired, model: str) -> str:
             f"{_mean([warm[i].input_tokens for i in idx]):,.0f} | {judge} |"
         )
     return "\n".join(lines) + "\n"
+
+
+def group_markdown(paired: Paired, group_of: dict[str, str], label: str) -> str:
+    """Judge accuracy cold → warm per group (e.g. how the answer that recorded the trail was judged).
+
+    >>> p = Paired(ids=["a"], arms={"cold": [RunScore(3, 3, 10, 1.0, True, 0.5, 0.0, "none")],
+    ...                             "warm": [RunScore(1, 0, 5, 1.0, True, 0.5, 1.0, "prefetch")]})
+    >>> print(group_markdown(p, {"a": "correct"}, "Phase A").splitlines()[2])
+    | correct | 1 | 3.0 → 1.0 | 0% → 100% |
+    """
+    cold, warm = paired.arms["cold"], paired.arms["warm"]
+    lines = [f"| {label} | Questions | Calls cold → warm | Judge cold → warm |", "|---|---|---|---|"]
+    for group in sorted({group_of.get(i, "none") for i in paired.ids}):
+        idx = [k for k, i in enumerate(paired.ids) if group_of.get(i, "none") == group]
+        jdx = [k for k in idx if cold[k].judge is not None and warm[k].judge is not None]
+        judge = (
+            f"{_mean([cold[k].judge or 0 for k in jdx]):.0%} → {_mean([warm[k].judge or 0 for k in jdx]):.0%}"
+            if jdx
+            else "—"
+        )
+        lines.append(
+            f"| {group} | {len(idx)} | {_mean([cold[k].calls for k in idx]):.1f} → "
+            f"{_mean([warm[k].calls for k in idx]):.1f} | {judge} |"
+        )
+    return "\n".join(lines) + "\n"
