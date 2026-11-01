@@ -46,6 +46,30 @@ The cold arm is the same as above.
   The admission rule (record only with a positive outcome signal) is what makes the cache safe; here every answer
   was self-approved. The oracle results above are an upper bound on the per-hit benefit.
 
+## Gated: only trails from answers judged correct (WixQA, n = 200)
+
+Same phase A as above, but a trail is admitted only if its answer was judged correct (116 of 200), standing in for
+explicit user feedback. The judge sees the reference answer, so this is an ideal gate. Same cold arm.
+
+| | Cold | Warm, self-recorded | Warm, gated |
+|---|---|---|---|
+| Recall fires (offline) | — | 178/200, 69% hold gold | 115/200, 78% hold gold |
+| Tool calls | 3.40 | 2.08 | 2.52 (−0.87, CI −1.07 to −0.67) |
+| Input tokens | 15.0k | 10.0k | 11.6k (−22%) |
+| Judged correct | 69.8% | 74.2% (+4.5, CI −0.8 to +9.8) | **75.5%** (+5.8, CI **+1.0 to +10.8**) |
+
+| Phase-A answer | n | Cold | Warm, self-recorded | Warm, gated |
+|---|---|---|---|---|
+| correct | 117 | 79% | 87% | 91% |
+| partial | 62 | 60% | 69% | 59% (no trail) |
+| incorrect | 21 | 50% | **21%** | 40% (20 of 21 got no trail) |
+
+- Gating removes the harm: the questions whose first answer was wrong no longer receive that wrong path. Their
+  50% → 40% comes from runs that missed in the warm arm, so it is run-to-run noise, not cache damage.
+- The price is coverage: fewer hits, so savings fall from −1.31 to −0.87 calls per question. Accuracy is the first
+  significant gain without oracle trails.
+- Partial answers were excluded by this gate; with self-recording they still helped (60% → 69%).
+
 ## How often the cache fires (offline, no LLM)
 
 | Setting | Recall fires | Recalled nodes hold the gold |

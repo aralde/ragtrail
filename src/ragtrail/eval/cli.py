@@ -42,6 +42,8 @@ class Scenario:
     matched_first: bool
     trails: str = "oracle"
     cold_from: str | None = None
+    phase_a_from: str | None = None
+    gate: tuple[str, ...] | None = None
 
 
 SCENARIOS = {
@@ -80,6 +82,21 @@ SCENARIOS = {
         True,
         trails="self",
         cold_from="repeat",
+    ),
+    ("wixqa", "repeat-gated"): Scenario(
+        "wixqa",
+        "repeat-gated",
+        "Like `repeat-self`, but a trail is admitted only when its phase-A answer was judged correct (a "
+        "stand-in for explicit user feedback; the judge sees the reference answer). Phase A and the cold arm "
+        "are reused from `repeat-self` and `repeat`.",
+        (TEST_SPLIT,),
+        PARAPHRASE_SPLIT,
+        None,
+        True,
+        trails="self",
+        cold_from="repeat",
+        phase_a_from="repeat-self",
+        gate=("correct",),
     ),
     ("qasper", "repeat"): Scenario(
         "qasper",
@@ -125,6 +142,28 @@ def _questions(args: argparse.Namespace, splits: tuple[str, ...] | str) -> list[
 def _rows(args: argparse.Namespace, run: str) -> list[RecallRow]:
     data = json.loads((_dir(args) / f"offline-{run}.json").read_text(encoding="utf-8"))
     return [RecallRow(**{**r, "nodes": tuple(r["nodes"])}) for r in data["rows"]]
+
+
+def _phase_a_name(args: argparse.Namespace, sc: Scenario, embed: bool | None = None) -> str:
+    """Run name of the phase A a self-trail scenario records (or reuses)."""
+    embed = bool(getattr(args, "embed", None)) if embed is None else embed
+    return (sc.phase_a_from or sc.name) + ("-embed" if embed else "") + "-phaseA"
+
+
+def _phase_a_verdicts(
+    args: argparse.Namespace, sc: Scenario, judge: str, embed: bool | None = None
+) -> dict[str, str]:
+    """Question id → how its phase-A answer was judged (empty if not judged yet)."""
+    from ragtrail.eval.agent import load_runs
+    from ragtrail.eval.report import judge_key
+
+    name = _phase_a_name(args, sc, embed)
+    path = _dir(args) / f"judgments-{name}.{judge}.json"
+    if not path.exists():
+        return {}
+    verdicts: dict[str, str] = json.loads(path.read_text())
+    runs = load_runs(_dir(args) / f"runs-{name}.jsonl")
+    return {r["id"]: verdicts[k] for r in runs if (k := judge_key(name, r["id"], r["arm"])) in verdicts}
 
 
 def _doc_of(corpus: Path) -> Any:  # pragma: no cover - needs subforest
@@ -203,8 +242,17 @@ def cmd_offline(args: argparse.Namespace) -> int:  # pragma: no cover - needs su
             from ragtrail.eval.agent import load_runs
             from ragtrail.eval.offline import warm_from_records
 
-            phase_a = load_runs(_dir(args) / f"runs-{_run(args, sc)}-phaseA.jsonl")
-            records = [r for run in phase_a if run["status"] == "ok" for r in run.get("records", [])]
+            phase_a = load_runs(_dir(args) / f"runs-{_phase_a_name(args, sc)}.jsonl")
+            runs = [run for run in phase_a if run["status"] == "ok"]
+            if sc.gate:
+                verdicts = _phase_a_verdicts(args, sc, "sonnet")
+                if not verdicts:
+                    raise SystemExit("error: judge phase A first (eval judge --phase-a)")
+                runs = [run for run in runs if verdicts.get(run["id"]) in sc.gate]
+            outcome = "feedback" if sc.gate else None
+            records = [
+                {**r, "outcome": outcome or r.get("outcome")} for run in runs for r in run.get("records", [])
+            ]
             admitted = warm_from_records(store, SubforestResolver(tree), records, "eval", embedder=embedder)
         else:
             admitted = warm_up(store, SubforestResolver(tree), warm, "eval", embedder=embedder)
@@ -286,6 +334,8 @@ def cmd_selfrecord(args: argparse.Namespace) -> int:  # pragma: no cover - needs
     sc = _scenario(args)
     if sc.trails != "self":
         raise SystemExit(f"error: scenario {sc.name!r} uses oracle trails; nothing to self-record")
+    if sc.phase_a_from:
+        raise SystemExit(f"error: scenario {sc.name!r} reuses phase A of {sc.phase_a_from!r}; record that")
     config = AgentConfig(
         model=args.model,
         max_calls=args.max_calls,
@@ -295,8 +345,8 @@ def cmd_selfrecord(args: argparse.Namespace) -> int:  # pragma: no cover - needs
     )
     run_agent(
         _questions(args, sc.warm),
-        _dir(args) / f"runs-{_run(args, sc)}-phaseA.jsonl",
-        scenario=f"{_run(args, sc)}-phaseA",
+        _dir(args) / f"runs-{_phase_a_name(args, sc)}.jsonl",
+        scenario=_phase_a_name(args, sc),
         corpus=corpus_path(args.data, args.dataset).resolve(),
         warm_db=Path("/nonexistent"),
         config=config,
@@ -312,7 +362,7 @@ def cmd_judge(args: argparse.Namespace) -> int:  # pragma: no cover - needs the 
     from ragtrail.eval.report import judge_key
 
     sc = _scenario(args)
-    run_name = _run(args, sc) + ("-phaseA" if args.phase_a else "")
+    run_name = _phase_a_name(args, sc) if args.phase_a else _run(args, sc)
     by_id = {q.id: q for q in _questions(args, sc.warm if args.phase_a else sc.test)}
     path = _dir(args) / f"judgments-{run_name}.{args.model}.json"
     verdicts: dict[str, str] = json.loads(path.read_text()) if path.exists() else {}
@@ -331,7 +381,7 @@ def cmd_judge(args: argparse.Namespace) -> int:  # pragma: no cover - needs the 
 
 def cmd_report(args: argparse.Namespace) -> int:  # pragma: no cover - needs subforest and data
     from ragtrail.eval.agent import load_runs
-    from ragtrail.eval.report import agent_markdown, pair_runs
+    from ragtrail.eval.report import agent_markdown, group_markdown, pair_runs
 
     doc_of = _doc_of(corpus_path(args.data, args.dataset))
     parts = [
@@ -376,6 +426,18 @@ def cmd_report(args: argparse.Namespace) -> int:  # pragma: no cover - needs sub
                 paired = pair_runs(run, runs, _questions(args, sc.test), doc_of, verdicts, keys)
                 models = ", ".join(sorted({r["model"] for r in runs}))
                 parts += [f"### Agent runs ({name}, {matcher})", "", agent_markdown(paired, models)]
+                phase_a = (
+                    _phase_a_verdicts(args, sc, args.judge, embed=bool(suffix)) if sc.trails == "self" else {}
+                )
+                if phase_a:
+                    phase_a = {
+                        q.id: v for q in _questions(args, sc.test) if (v := phase_a.get(q.source_id or q.id))
+                    }
+                    parts += [
+                        "By how the phase-A answer that recorded the trail was judged:",
+                        "",
+                        group_markdown(paired, phase_a, "Phase-A answer"),
+                    ]
     text = "\n".join(parts)
     out = args.out or Path(f"reports/{args.dataset}-eval.md")
     out.parent.mkdir(parents=True, exist_ok=True)
