@@ -384,6 +384,163 @@ def cmd_report(args: argparse.Namespace) -> int:  # pragma: no cover - needs sub
     return 0
 
 
+def _robustness_items(
+    args: argparse.Namespace,
+) -> tuple[
+    list[tuple[EvalQuestion, str]], list[tuple[EvalQuestion, str]], list[EvalQuestion]
+]:  # pragma: no cover
+    """(warm questions with scope, extra first-time questions with scope, paraphrases) for `edits`/`stream`.
+
+    QASPER uses the paper as scope and matches the bare question (the fixed-context finding); its extra
+    questions are the other evidence-backed questions on the same papers. WixQA uses one scope; its extra
+    questions are WixQA-Simulated."""
+    warm = _questions(args, TEST_SPLITS[args.dataset])
+    paraphrases = _questions(args, PARAPHRASE_SPLIT)
+    if args.dataset != "qasper":
+        return (
+            [(q, "eval") for q in warm],
+            [(q, "eval") for q in _questions(args, "wixqa_simulated")],
+            paraphrases,
+        )
+    from subforest import TreeStore
+    from subforest.eval.datasets import Dataset, build_qasper
+
+    from ragtrail.eval.data import evidence_nodes
+
+    def bare(q: EvalQuestion) -> EvalQuestion:
+        m = _TITLED.match(q.question)
+        return q.model_copy(update={"question": m["question"]}) if m else q
+
+    _, every = build_qasper(Dataset("qasper", args.data))
+    by_id = {q.id: q for q in every}
+    papers = {q.id: f"p{by_id[q.id].gold_docs[0]}" for q in warm}
+    with TreeStore(corpus_path(args.data, "qasper")) as tree:
+        extra = [
+            (
+                EvalQuestion(
+                    id=q.id,
+                    split="qasper_other",
+                    question=q.question,
+                    answer=q.answer,
+                    gold=evidence_nodes(tree, q.gold_docs[0], [(s.start, s.end) for s in q.gold_spans]),
+                ),
+                f"p{q.gold_docs[0]}",
+            )
+            for q in every
+            if q.id not in papers and q.gold_spans and f"p{q.gold_docs[0]}" in set(papers.values())
+        ]
+    paraphrased = [bare(p).model_copy(update={"split": PARAPHRASE_SPLIT}) for p in paraphrases]
+    return [(bare(q), papers[q.id]) for q in warm], extra, paraphrased
+
+
+def _embedder(args: argparse.Namespace) -> Any:  # pragma: no cover - downloads a model
+    if not args.embed:
+        return None
+    from ragtrail.embed import FastEmbedder
+
+    return FastEmbedder(args.embed)
+
+
+def cmd_edits(args: argparse.Namespace) -> int:  # pragma: no cover - needs subforest and data
+    from subforest import TreeStore
+
+    from ragtrail.eval.offline import warm_up
+    from ragtrail.eval.stream import edit_markdown, edit_rows
+    from ragtrail.store import SQLiteStore
+    from ragtrail.subforest import SubforestResolver
+
+    embedder = _embedder(args)
+    warm, _, paraphrases = _robustness_items(args)
+    scope_of = {q.id: s for q, s in warm}
+    test = [(p, scope_of[p.source_id or ""]) for p in paraphrases if p.source_id in scope_of]
+    cited = sorted({g for q, _ in warm for g in q.gold})
+    out = _dir(args)
+    db = out / f"trails-edits{_suffix(args)}.db"
+    db.unlink(missing_ok=True)
+    with TreeStore(corpus_path(args.data, args.dataset)) as tree:
+        resolver = SubforestResolver(tree)
+        with SQLiteStore(db) as store:
+            for q, scope in warm:
+                warm_up(store, resolver, [q], scope, embedder=embedder)
+        scratch = db.with_suffix(".scoring.db")
+
+        def fresh() -> SQLiteStore:
+            shutil.copyfile(db, scratch)
+            return SQLiteStore(scratch)
+
+        rows = edit_rows(
+            fresh, resolver, test, cited, args.rates, budget_tokens=args.budget, embedder=embedder
+        )
+    scratch.unlink(missing_ok=True)
+    md = "\n".join(
+        [
+            f"## Corpus edits — {args.dataset}{', embeddings' if embedder else ', lexical'}",
+            "",
+            f"Warm-up: {len(warm)} oracle trails. Test: {len(test)} paraphrased repeats. After recording, "
+            f"a seeded random share of the {len(cited)} cited nodes is edited (nested across rates). The "
+            "copy cache and the unvalidated pointer cache are assumed to match exactly as ragtrail does, so "
+            "only freshness differs.",
+            "",
+            edit_markdown(rows),
+        ]
+    )
+    (out / f"edits{_suffix(args)}.json").write_text(
+        json.dumps({"rows": [asdict(r) for r in rows]}), encoding="utf-8"
+    )
+    (out / f"edits{_suffix(args)}.md").write_text(md, encoding="utf-8")
+    print(md)
+    return 0
+
+
+def cmd_stream(args: argparse.Namespace) -> int:  # pragma: no cover - needs subforest and data
+    from subforest import TreeStore
+
+    from ragtrail.eval.stream import build_stream, run_stream, stream_markdown
+    from ragtrail.store import SQLiteStore
+    from ragtrail.subforest import SubforestResolver
+
+    embedder = _embedder(args)
+    warm, extra, paraphrases = _robustness_items(args)
+    new = warm + extra
+    doc_of = _doc_of(corpus_path(args.data, args.dataset)) if args.dataset == "wixqa" else None
+    by_rate = {}
+    with TreeStore(corpus_path(args.data, args.dataset)) as tree:
+        for rate in args.rates:
+            events = build_stream(new, paraphrases, rate, seed=args.seed)
+            with SQLiteStore(":memory:") as store:
+                by_rate[rate] = run_stream(
+                    store,
+                    SubforestResolver(tree),
+                    events,
+                    budget_tokens=args.budget,
+                    embedder=embedder,
+                    doc_of=doc_of,
+                )
+            print(f"rate {rate:.0%}: {len(events)} events", flush=True)
+    md = "\n".join(
+        [
+            f"## Mixed traffic — {args.dataset}{', embeddings' if embedder else ', lexical'}",
+            "",
+            "Cache starts empty. First-time questions are interleaved with paraphrased repeats at the given "
+            "rate; every answer records an oracle trail. `sibling` = a first-time question whose scope "
+            "(paper) already holds trails of other questions: it should miss. Hits without gold are false "
+            "hits.",
+            "",
+            stream_markdown(by_rate),
+        ]
+    )
+    (_dir(args) / f"stream{_suffix(args)}.json").write_text(
+        json.dumps({str(k): [asdict(r) for r in v] for k, v in by_rate.items()}), encoding="utf-8"
+    )
+    (_dir(args) / f"stream{_suffix(args)}.md").write_text(md, encoding="utf-8")
+    print(md)
+    return 0
+
+
+def _suffix(args: argparse.Namespace) -> str:
+    return "-embed" if args.embed else ""
+
+
 def add_eval_parser(sub: Any) -> None:
     """Register `ragtrail eval` and its subcommands on the main parser's subparsers."""
     ev = sub.add_parser("eval", help="cold vs warm evaluation on WixQA or QASPER (needs subforest)")
@@ -423,6 +580,17 @@ def add_eval_parser(sub: Any) -> None:
     j.add_argument("--embed", nargs="?", const=DEFAULT_MODEL, help="judge the embeddings variant")
     j.add_argument("--phase-a", action="store_true", help="judge the self-record phase A answers")
     j.set_defaults(func=cmd_judge)
+    ed = cmds.add_parser("edits", help="edit cited nodes after recording; compare cache designs (offline)")
+    ed.add_argument("--rates", type=float, nargs="+", default=[0.0, 0.05, 0.1, 0.25, 0.5])
+    ed.add_argument("--budget", type=int, default=2000, help="recall token budget")
+    ed.add_argument("--embed", nargs="?", const=DEFAULT_MODEL, help="also match by embeddings (model)")
+    ed.set_defaults(func=cmd_edits)
+    st = cmds.add_parser("stream", help="empty cache, mixed new and repeated questions (offline)")
+    st.add_argument("--rates", type=float, nargs="+", default=[0.1, 0.2, 0.3, 0.4])
+    st.add_argument("--seed", type=int, default=7)
+    st.add_argument("--budget", type=int, default=2000, help="recall token budget")
+    st.add_argument("--embed", nargs="?", const=DEFAULT_MODEL, help="also match by embeddings (model)")
+    st.set_defaults(func=cmd_stream)
     r = cmds.add_parser("report", help="write the Markdown report")
     r.add_argument("--out", type=Path, help="default reports/<dataset>-eval.md")
     r.add_argument("--judge", default="sonnet", help="whose verdicts to report")

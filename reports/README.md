@@ -63,6 +63,39 @@ The cold arm is the same as above.
 - The QASPER agent runs used titled matching (every paraphrase hit), so they measure the benefit **per hit** on long
   documents. With the paper as scope, about 7 in 10 paraphrases hit.
 
+## Corpus edits and mixed traffic (offline, no LLM, embeddings on)
+
+**Edits.** After recording, a random share of the cited nodes is edited; the repeats that hit before any edit are
+replayed. A copy cache (stores cited text, TTL only, like MERMAIDS) and a pointer cache without validation would
+serve the same hits, with old or silently changed text.
+
+| Nodes edited | WixQA hits (179): copy cache serves old text | ragtrail prefetch / hint / miss | QASPER hits (274): copy cache serves old text | ragtrail prefetch / hint / miss |
+|---|---|---|---|---|
+| 5% | 11 (6%) | 99 / 80 / 0 | 20 (7%) | 176 / 93 / 5 |
+| 10% | 21 (12%) | 91 / 82 / 6 | 41 (15%) | 163 / 97 / 14 |
+| 25% | 49 (27%) | 74 / 76 / 29 | 94 (34%) | 122 / 108 / 44 |
+| 50% | 91 (51%) | 50 / 63 / 66 | 177 (65%) | 65 / 103 / 106 |
+
+ragtrail served a changed node 0 times at every rate; the price is fewer full prefetches.
+
+**Mixed traffic.** Empty cache; first-time questions interleaved with paraphrased repeats; every answer records an
+oracle trail. "Sibling" = another question about a paper that already has trails (it should miss).
+
+| Dataset | Repeat rate | Questions | Recall fires | Of which without gold (false hits) | Repeats that hit |
+|---|---|---|---|---|---|
+| WixQA | 10% | 444 | 18% | 16 (3.6% of all questions) | 86% |
+| WixQA | 30% | 571 | 34% | 18 (3.2%) | 88% |
+| WixQA | 40% | 500 | 41% | 13 (2.6%) | 90% |
+| QASPER | 10% | 1,422 | 9% | 8 (0.6%) | 73% |
+| QASPER | 20% | 1,600 | 16% | 8 (0.5%) | 71% |
+
+- Firing tracks the repeat rate; false hits stay at 1–4% of traffic. On WixQA, first-time questions also fire 11% of
+  the time, and 6 in 10 of those reuse a gold article (legitimate cross-question reuse).
+- Lexical-only matching fires far less (WixQA 7–8%, QASPER 4–8%) with similar false-hit rates.
+- QASPER cannot exceed ~24% repeats with one paraphrase per question; the 30–40% rows drop sibling questions.
+
+Details: [robustness.md](robustness.md).
+
 ## Limits
 
 - Paraphrases are model-written, and every test question is a repeat; real traffic repeats far less (search logs:
@@ -70,6 +103,7 @@ The cold arm is the same as above.
 - The judge (Sonnet) is in the same family as the agent and was checked on only 40 labels.
 - Disjoint questions (different WixQA splits) barely repeat; the 20-question pilots there showed no accuracy change
   but have wide CIs (see `wixqa-eval.md`).
-- No comparison against other methods (answer caching, better retrieval); only cache on vs off.
+- No agent-level comparison against other methods yet (APC, answer caching); the edit test compares cache designs
+  offline, assuming identical matching.
 
 Files: [wixqa-eval.md](wixqa-eval.md), [qasper-eval.md](qasper-eval.md). Related work: [docs/related-work](../docs/related-work/README.md).
