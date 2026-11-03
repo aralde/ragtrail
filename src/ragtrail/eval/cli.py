@@ -44,6 +44,7 @@ class Scenario:
     cold_from: str | None = None
     phase_a_from: str | None = None
     gate: tuple[str, ...] | None = None
+    gate_by: str = "judge"
 
 
 SCENARIOS = {
@@ -97,6 +98,23 @@ SCENARIOS = {
         cold_from="repeat",
         phase_a_from="repeat-self",
         gate=("correct",),
+    ),
+    ("wixqa", "repeat-verified"): Scenario(
+        "wixqa",
+        "repeat-verified",
+        "Like `repeat-gated`, but the gate is reference-free: a trail is admitted only when a model, shown "
+        "the question, the phase-A answer and the current text of the cited nodes (never the reference), "
+        "says the answer is supported by them. Phase A and the cold arm are reused from `repeat-self` and "
+        "`repeat`.",
+        (TEST_SPLIT,),
+        PARAPHRASE_SPLIT,
+        None,
+        True,
+        trails="self",
+        cold_from="repeat",
+        phase_a_from="repeat-self",
+        gate=("supported",),
+        gate_by="verify",
     ),
     ("qasper", "repeat"): Scenario(
         "qasper",
@@ -164,6 +182,18 @@ def _phase_a_verdicts(
     verdicts: dict[str, str] = json.loads(path.read_text())
     runs = load_runs(_dir(args) / f"runs-{name}.jsonl")
     return {r["id"]: verdicts[k] for r in runs if (k := judge_key(name, r["id"], r["arm"])) in verdicts}
+
+
+def _verify_path(args: argparse.Namespace, sc: Scenario, model: str, embed: bool | None = None) -> Path:
+    return _dir(args) / f"verify-{_phase_a_name(args, sc, embed)}.{model}.json"
+
+
+def _gate_verdicts(args: argparse.Namespace, sc: Scenario) -> dict[str, str]:
+    """Question id → gate verdict on its phase-A answer: the judge's, or the reference-free verifier's."""
+    if sc.gate_by == "verify":
+        path = _verify_path(args, sc, args.gate_model)
+        return dict(json.loads(path.read_text())) if path.exists() else {}
+    return _phase_a_verdicts(args, sc, "sonnet")
 
 
 def _doc_of(corpus: Path) -> Any:  # pragma: no cover - needs subforest
@@ -245,9 +275,10 @@ def cmd_offline(args: argparse.Namespace) -> int:  # pragma: no cover - needs su
             phase_a = load_runs(_dir(args) / f"runs-{_phase_a_name(args, sc)}.jsonl")
             runs = [run for run in phase_a if run["status"] == "ok"]
             if sc.gate:
-                verdicts = _phase_a_verdicts(args, sc, "sonnet")
+                verdicts = _gate_verdicts(args, sc)
                 if not verdicts:
-                    raise SystemExit("error: judge phase A first (eval judge --phase-a)")
+                    step = "eval verify" if sc.gate_by == "verify" else "eval judge --phase-a"
+                    raise SystemExit(f"error: no gate verdicts yet; run {step} first")
                 runs = [run for run in runs if verdicts.get(run["id"]) in sc.gate]
             outcome = "feedback" if sc.gate else None
             records = [
@@ -356,6 +387,45 @@ def cmd_selfrecord(args: argparse.Namespace) -> int:  # pragma: no cover - needs
     return 0
 
 
+def cmd_verify(args: argparse.Namespace) -> int:  # pragma: no cover - needs subforest and the claude CLI
+    """Reference-free gate: check each phase-A answer against the current text of the nodes it cited."""
+    from subforest import TreeStore
+
+    from ragtrail.eval.agent import load_runs
+    from ragtrail.eval.verify import verify_runs
+    from ragtrail.subforest import SubforestResolver
+
+    sc = _scenario(args)
+    if sc.gate_by != "verify":
+        raise SystemExit(f"error: scenario {sc.name!r} is not gated by the verifier")
+    path = _verify_path(args, sc, args.model)
+    done: dict[str, str] = json.loads(path.read_text()) if path.exists() else {}
+    by_id = {q.id: q for q in _questions(args, sc.warm)}
+    items = []
+    with TreeStore(corpus_path(args.data, args.dataset)) as tree:
+        resolver = SubforestResolver(tree)
+        for run in load_runs(_dir(args) / f"runs-{_phase_a_name(args, sc)}.jsonl"):
+            if run["status"] != "ok" or run["id"] in done:
+                continue
+            cited = list(dict.fromkeys(c for r in run.get("records", []) for c in r.get("cited", [])))
+            sources = [
+                f"[{c}] {resolver.label(c)}\n{resolver.read(c, args.source_tokens)}"
+                for c in cited
+                if resolver.content_hash(c) is not None
+            ]
+            if not sources:
+                done[run["id"]] = "unsupported"
+                continue
+            q = by_id[run["id"]]
+            items.append(
+                {"key": run["id"], "question": q.question, "answer": run["answer"], "sources": sources}
+            )
+    done.update(verify_runs(items, model=args.model))
+    path.write_text(json.dumps(done, indent=1), encoding="utf-8")
+    print(f"{len(done)} verdicts in {path}: {sum(v == 'supported' for v in done.values())} supported")
+    return 0
+
+
 def cmd_judge(args: argparse.Namespace) -> int:  # pragma: no cover - needs the claude CLI
     from ragtrail.eval.agent import load_runs
     from ragtrail.eval.judge import judge_runs
@@ -433,6 +503,21 @@ def cmd_report(args: argparse.Namespace) -> int:  # pragma: no cover - needs sub
                     phase_a = {
                         q.id: v for q in _questions(args, sc.test) if (v := phase_a.get(q.source_id or q.id))
                     }
+                    if sc.gate_by == "verify":
+                        from ragtrail.eval.verify import agreement
+
+                        gate_path = _verify_path(args, sc, "haiku", embed=bool(suffix))
+                        gate = json.loads(gate_path.read_text()) if gate_path.exists() else {}
+                        raw = _phase_a_verdicts(args, sc, args.judge, embed=bool(suffix))
+                        counts = agreement(gate, raw)
+                        parts += [
+                            "Gate verdicts against the judge's verdict on the same phase-A answer:",
+                            "",
+                            "| Gate | Judge | Answers |",
+                            "|---|---|---|",
+                            *(f"| {g} | {j} | {n} |" for (g, j), n in sorted(counts.items())),
+                            "",
+                        ]
                     parts += [
                         "By how the phase-A answer that recorded the trail was judged:",
                         "",
@@ -618,6 +703,7 @@ def add_eval_parser(sub: Any) -> None:
     o.add_argument("--scenario", choices=sorted({name for _, name in SCENARIOS}), required=True)
     o.add_argument("--budget", type=int, default=2000, help="recall token budget")
     o.add_argument("--embed", nargs="?", const=DEFAULT_MODEL, help="also match by embeddings (model)")
+    o.add_argument("--gate-model", default="haiku", help="verifier whose verdicts gate a verified scenario")
     o.set_defaults(func=cmd_offline)
     a = cmds.add_parser("agent", help="run the cold/warm agent pilot (claude -p)")
     a.add_argument("--scenario", choices=sorted({name for _, name in SCENARIOS}), required=True)
@@ -653,6 +739,14 @@ def add_eval_parser(sub: Any) -> None:
     st.add_argument("--budget", type=int, default=2000, help="recall token budget")
     st.add_argument("--embed", nargs="?", const=DEFAULT_MODEL, help="also match by embeddings (model)")
     st.set_defaults(func=cmd_stream)
+    v = cmds.add_parser(
+        "verify", help="reference-free gate: are phase-A answers supported by their citations"
+    )
+    v.add_argument("--scenario", default="repeat-verified")
+    v.add_argument("--model", default="haiku", help="verifier model")
+    v.add_argument("--source-tokens", type=int, default=800, help="max tokens read per cited node")
+    v.add_argument("--embed", nargs="?", const=DEFAULT_MODEL, help="same phase A as the embeddings runs")
+    v.set_defaults(func=cmd_verify)
     r = cmds.add_parser("report", help="write the Markdown report")
     r.add_argument("--out", type=Path, help="default reports/<dataset>-eval.md")
     r.add_argument("--judge", default="sonnet", help="whose verdicts to report")
