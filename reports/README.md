@@ -70,6 +70,39 @@ explicit user feedback. The judge sees the reference answer, so this is an ideal
   significant gain without oracle trails.
 - Partial answers were excluded by this gate; with self-recording they still helped (60% → 69%).
 
+## Reference-free gate (WixQA, n = 200)
+
+Same phase A and cold arm as above, but the gate never sees the reference answer. A verifier (Haiku via `claude -p`) is
+shown the question, the phase-A answer and the current text of the nodes it cited, and a trail is admitted only if it
+says the answer is supported by them (134 of 200). This is a gate a deployment could run.
+
+| | Cold | Warm, self-recorded | Warm, ideal gate | Warm, reference-free gate |
+|---|---|---|---|---|
+| Recall fires (offline) | — | 178/200, 69% hold gold | 115/200, 78% hold gold | 127/200, 74% hold gold (95 prefetch, 32 hint) |
+| Tool calls | 3.40 | 2.08 | 2.52 (−0.87, CI −1.07 to −0.67) | 2.40 (−1.00, CI −1.21 to −0.80) |
+| Input tokens | 15.0k | 10.0k | 11.6k (−22%) | 12.5k (−17%) |
+| Judged correct | 69.8% | 74.2% (+4.5, CI −0.8 to +9.8) | **75.5%** (+5.8, CI +1.0 to +10.8) | 74.0% (+4.2, CI −0.8 to +9.2), sign test p = 0.18 |
+
+| Phase-A answer | n | Cold | Warm, self-recorded | Warm, ideal gate | Warm, reference-free gate |
+|---|---|---|---|---|---|
+| correct | 117 | 79% | 87% | 91% | 91% |
+| partial | 62 | 60% | 69% | 59% | 58% |
+| incorrect | 21 | 50% | **21%** | 40% | **29%** |
+
+Verifier verdict against the judge's verdict on the same phase-A answer:
+
+| Verifier | Judge: correct | Judge: partial | Judge: incorrect | Total |
+|---|---|---|---|---|
+| supported (admitted) | 88 | 36 | 10 | 134 |
+| unsupported (rejected) | 29 | 26 | 11 | 66 |
+
+- Savings are close to the ideal gate (−1.00 vs −0.87 calls) because the verifier admits more trails (134 vs 116).
+- Accuracy is above cold but, unlike the ideal gate, the interval includes zero (−0.8 to +9.2).
+- The verifier is a weak filter: 10 of 21 incorrect answers (48%) were still admitted, and 29 of 117 correct ones (25%)
+  were rejected. Of the admitted trails, 66% were judged correct (88/134), against 58% across all 200 answers.
+- The incorrect-first-answer group is at 29% (n = 21), between self-recorded (21%) and the ideal gate (40%): the
+  reference-free check removes about half of the harm, not all of it.
+
 ## How often the cache fires (offline, no LLM)
 
 | Setting | Recall fires | Recalled nodes hold the gold |
