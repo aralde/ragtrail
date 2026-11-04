@@ -59,9 +59,12 @@ class AgentConfig:
     corpus_name: str = "the Wix help center"
     claude: str = "claude"
     python: str = sys.executable
+    strip_context: str | None = None
 
 
-def mcp_config(config: AgentConfig, corpus: Path, trails: Path, work: Path) -> dict[str, Any]:
+def mcp_config(
+    config: AgentConfig, corpus: Path, trails: Path, work: Path, scope: str = SCOPE
+) -> dict[str, Any]:
     """Two stdio servers: `docs` (subforest, chunks view) and `trails` (ragtrail, recall only), both logging.
 
     >>> cfg = mcp_config(AgentConfig(python="py"), Path("c.db"), Path("t.db"), Path("w"))
@@ -71,12 +74,14 @@ def mcp_config(config: AgentConfig, corpus: Path, trails: Path, work: Path) -> d
     docs = ["-m", "subforest.cli", "serve", "--db", str(corpus), "--view", "chunks"]
     docs += ["--budget", str(config.docs_budget), "--max-calls", str(config.max_calls)]
     docs += ["--log", str(work / "docs.jsonl")]
-    trail = ["-m", "ragtrail.cli", "serve", "--db", str(trails), "--scope", SCOPE, "--subforest", str(corpus)]
+    trail = ["-m", "ragtrail.cli", "serve", "--db", str(trails), "--scope", scope, "--subforest", str(corpus)]
     trail += ["--budget", str(config.recall_budget), "--log", str(work / "trails.jsonl")]
     if not config.allow_record:
         trail.append("--no-record")
     if config.embed:
         trail += ["--embed", config.embed]
+    if config.strip_context:
+        trail += ["--strip-context", config.strip_context]
     return {
         "mcpServers": {
             "docs": {"command": config.python, "args": docs},
@@ -128,6 +133,7 @@ def run_one(
     warm_db: Path,
     config: AgentConfig,
     invoke: Invoke = run_claude,
+    scope: str = SCOPE,
 ) -> dict[str, Any]:
     """Run one question in one arm and return the record written to `runs-<scenario>.jsonl`."""
     with tempfile.TemporaryDirectory(prefix="ragtrail-run-") as tmp:
@@ -136,7 +142,7 @@ def run_one(
         if arm == "warm":
             shutil.copyfile(warm_db, trails)
         mcp_path = work / "mcp.json"
-        mcp_path.write_text(json.dumps(mcp_config(config, corpus, trails, work)), encoding="utf-8")
+        mcp_path.write_text(json.dumps(mcp_config(config, corpus, trails, work, scope)), encoding="utf-8")
         start = time.monotonic()
         stdout = invoke(claude_command(config, mcp_path, question.question), work)
         elapsed = time.monotonic() - start
@@ -237,13 +243,17 @@ def run_agent(
     arms: Sequence[Arm] = ARMS,
     invoke: Invoke = run_claude,
     echo: Callable[[str], None] = print,
+    scope_of: Callable[[EvalQuestion], str] | None = None,
 ) -> int:
-    """Run pending pairs, appending to `runs_path`; stops early (no error) at the usage limit."""
+    """Run pending pairs, appending to `runs_path`; stops early (no error) at the usage limit.
+
+    `scope_of` gives each question its own trail scope (for example its paper); default: one shared scope."""
     runs_path.parent.mkdir(parents=True, exist_ok=True)
     todo = pending(questions, load_runs(runs_path), arms)[:max_runs]
     for i, (question, arm) in enumerate(todo, 1):
         try:
-            record = run_one(question, arm, scenario, corpus, warm_db, config, invoke)
+            scope = scope_of(question) if scope_of is not None else SCOPE
+            record = run_one(question, arm, scenario, corpus, warm_db, config, invoke, scope)
         except UsageLimitReached as exc:
             echo(f"usage limit reached after {i - 1} runs; rerun later to resume ({exc})")
             return i - 1

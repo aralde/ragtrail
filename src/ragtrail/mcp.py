@@ -7,6 +7,7 @@ another tenant's trails.
 from __future__ import annotations
 
 import json
+import re
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -92,6 +93,7 @@ def create_server(
     log: Path | None = None,
     allow_record: bool = True,
     embedder: Embedder | None = None,
+    strip_context: str | None = None,
 ) -> MCPServer:
     """Build an MCP server with `recall` and `record` bound to `store`, `resolver` and `scope`.
 
@@ -99,6 +101,8 @@ def create_server(
     `log` appends one JSON line per call (tool, arguments, structured result); evals count calls with it.
 
     With `resolver=None` the server runs unverified: hashes are not checked and recall never prefetches.
+    `strip_context` is a regex removed from every query before matching and recording: fixed context such as
+    a document title that the client always prepends (the scope should carry it instead).
 
     >>> import asyncio
     >>> from ragtrail.store import SQLiteStore
@@ -110,6 +114,10 @@ def create_server(
     active: NodeResolver = resolver if resolver is not None else UnverifiedResolver()
     instructions = INSTRUCTIONS if allow_record else INSTRUCTIONS.split("\n2.")[0]
     server: MCPServer = MCPServer(name="ragtrail", instructions=instructions)
+    context = re.compile(strip_context) if strip_context else None
+
+    def bare(query: str) -> str:
+        return context.sub("", query).strip() if context is not None else query
 
     def emit(tool: str, args: dict[str, Any], result: CallToolResult) -> CallToolResult:
         if log is not None:
@@ -129,7 +137,7 @@ def create_server(
         result = recall_trail(
             store,
             active,
-            query,
+            bare(query),
             scope,
             budget_tokens=budget_tokens,
             config=config,
@@ -151,7 +159,7 @@ def create_server(
             parsed = [Step.model_validate(s) for s in steps or []]
         except ValidationError as exc:
             return _result(f"Invalid steps: {exc.errors()[0]['msg']}.", {"recorded": False}, error=True)
-        recorder = Recorder(store, active, scope, query, config=config, ttl=ttl, embedder=embedder)
+        recorder = Recorder(store, active, scope, bare(query), config=config, ttl=ttl, embedder=embedder)
         for s in parsed:
             recorder.step(s.tool, s.args, s.returned)
         recorder.cite(cited)

@@ -80,6 +80,7 @@ def _serve(args: argparse.Namespace) -> int:
             log=args.log,
             allow_record=not args.no_record,
             embedder=embedder,
+            strip_context=args.strip_context,
         )
         server.run("stdio")
     return 0
@@ -119,6 +120,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serve.add_argument(
         "--no-record", action="store_true", help="serve recall only; the trail store stays fixed"
+    )
+    serve.add_argument(
+        "--strip-context", metavar="REGEX", help="remove this fixed context from queries before matching"
     )
     serve.set_defaults(func=_serve)
 

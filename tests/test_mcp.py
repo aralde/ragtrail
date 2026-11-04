@@ -200,3 +200,21 @@ def test_recall_only_server() -> None:
             assert [t.name for t in (await client.list_tools()).tools] == ["recall"]
 
     anyio.run(scenario)
+
+
+def test_strip_context_matches_the_bare_question() -> None:
+    store = SQLiteStore(":memory:")
+    corpus = Corpus()
+    title = 'About "Larch Accounts Handbook, Second Edition, Revised": '
+
+    async def scenario() -> None:
+        server = create_server(store, corpus.resolver(), "p1", strip_context=r'^About ".+?": ')
+        async with Client(server) as client:
+            await client.call_tool("record", {"query": title + Q1, "cited": ["n70"]})
+            assert data_of(await client.call_tool("recall", {"query": title + Q2}))["mode"] == "prefetch"
+            other = await client.call_tool("recall", {"query": title + "Which plans include SSO?"})
+            assert data_of(other)["mode"] == "miss"
+
+    anyio.run(scenario)
+    row = store._conn.execute("SELECT data FROM trajectories").fetchone()
+    assert json.loads(row[0])["query"] == Q1
