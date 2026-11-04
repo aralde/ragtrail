@@ -24,7 +24,7 @@ Not claimed: the fixed-context effect (a usage issue, kept in the docs only).
 | E3 | Self-recorded, reference-free gate (`repeat-verified`) | done | 200 verifier checks, 200 warm runs |
 | E4 | Corpus edits: ragtrail vs copy cache vs unvalidated pointers | done (offline) | 179 + 274 hits × 5 rates |
 | E5 | Mixed traffic, empty cache, 10–40% repeats | done (offline) | 444–1,600 questions |
-| E6 | Self-recorded + reference-free gate on QASPER (paper as scope) | code ready | 400 phase A, 400 checks, 400 warm |
+| E6 | Self-recorded + reference-free gate on QASPER (paper as scope) | done | 400 phase A, 400 checks, 400 warm |
 | E7 | Second agent model on E3 | todo | 400 phase A + 200 warm + 200 cold |
 | E8 | Judge validation: 150–200 human labels, second judge | todo | labels by hand |
 | E9 | Baseline: Agentic Plan Caching on QASPER | todo | 400 |
