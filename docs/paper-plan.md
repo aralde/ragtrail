@@ -22,6 +22,7 @@ Not claimed: the fixed-context effect (a usage issue, kept in the docs only).
 | E1 | Self-recorded, no gate | done | 200 pairs |
 | E2 | Self-recorded, ideal gate (judge with reference) | done | 200 pairs |
 | E3 | Self-recorded, reference-free gate (`repeat-verified`) | done | 200 verifier checks, 200 warm runs |
+| E3c | Verifier prompt v2: also reject self-declared non-answers (`repeat-verified-v2`) | done | 600 verifier checks, 200 + 400 warm runs |
 | E4 | Corpus edits: ragtrail vs copy cache vs unvalidated pointers | done (offline) | 179 + 274 hits × 5 rates |
 | E5 | Mixed traffic, empty cache, 10–40% repeats | done (offline) | 444–1,600 questions |
 | E6 | Self-recorded + reference-free gate on QASPER (paper as scope) | done | 400 phase A, 400 checks, 400 warm |

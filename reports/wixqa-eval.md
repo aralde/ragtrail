@@ -327,3 +327,75 @@ By how the phase-A answer that recorded the trail was judged:
 | correct | 117 | 3.1 → 2.1 | 79% → 91% |
 | incorrect | 21 | 4.2 → 3.2 | 50% → 29% |
 | partial | 62 | 3.6 → 2.6 | 60% → 58% |
+
+## Scenario: repeat-verified-sonnet — lexical + embeddings
+
+Same as `repeat-verified` (reference-free gate on the cited nodes' current text), with Sonnet instead of Haiku as the verifier. Phase A and the cold arm are reused from `repeat-self` and `repeat`.
+
+- Warm-up questions: 200 (151 trails admitted)
+- Test questions: 200; exact normalized duplicates of a warm-up question: 0
+- Thresholds: hint ≥ 0.4, prefetch ≥ 0.5; LSH 42x3; recall budget 2000 tokens
+- Embedding matcher: BAAI/bge-small-en-v1.5 (cosine hint ≥ 0.88, prefetch ≥ 0.92; SimHash 30x16)
+
+| Mode | Questions | Share | Recalled nodes include gold (95% CI) | Mean similarity | Mean recall tokens |
+|---|---|---|---|---|---|
+| prefetch | 103 | 52% | 76/103 = 74% (65% to 81%) | 0.95 | 967 |
+| hint | 41 | 20% | 28/41 = 68% (53% to 80%) | 0.89 | 136 |
+| miss | 56 | 28% | — | 0.79 | 0 |
+
+## Scenario: repeat-verified-v2 — lexical + embeddings
+
+Same as `repeat-verified`, with a verifier prompt that also rejects answers saying the cited nodes do not cover the question (v2). Phase A and the cold arm are reused from `repeat-self` and `repeat`.
+
+- Warm-up questions: 200 (79 trails admitted)
+- Test questions: 200; exact normalized duplicates of a warm-up question: 0
+- Thresholds: hint ≥ 0.4, prefetch ≥ 0.5; LSH 42x3; recall budget 2000 tokens
+- Embedding matcher: BAAI/bge-small-en-v1.5 (cosine hint ≥ 0.88, prefetch ≥ 0.92; SimHash 30x16)
+
+| Mode | Questions | Share | Recalled nodes include gold (95% CI) | Mean similarity | Mean recall tokens |
+|---|---|---|---|---|---|
+| prefetch | 55 | 28% | 47/55 = 85% (74% to 92%) | 0.95 | 944 |
+| hint | 22 | 11% | 16/22 = 73% (52% to 87%) | 0.90 | 111 |
+| miss | 123 | 62% | — | 0.74 | 0 |
+
+### Agent runs (repeat-verified-v2, lexical + embeddings)
+
+200 questions answered in both arms by `haiku` through `claude -p`; same tools, prompt and call cap.
+
+| Metric | cold | warm | Δ warm - cold | 95% CI |
+|---|---|---|---|---|
+| Tool calls (incl. recall) | 3.40 | 2.81 | -0.59 | -0.79 to -0.39 |
+| Docs tool calls | 2.40 | 1.80 | -0.59 | -0.79 to -0.39 |
+| Input tokens | 14,995 | 13,862 | -1,133 | -2,001 to -257 |
+| Seconds | 12.1 | 11.3 | -0.7 | -1.0 to -0.4 |
+| Saw a gold doc | 72.0% | 72.5% | +0.5% | -5.0% to +6.0% |
+| Answer token F1 | 0.354 | 0.372 | +0.018 | +0.007 to +0.029 |
+| Judge accuracy (n=200) | 69.8% | 75.2% | +5.5% | +0.8% to +10.2% |
+
+Judge: warm better on 38, cold better on 22; sign test p = 0.052.
+
+By warm recall mode:
+
+| Warm recall | Questions | Calls cold → warm | Input tokens cold → warm | Judge cold → warm |
+|---|---|---|---|---|
+| prefetch | 55 | 3.1 → 1.1 | 13,707 → 7,561 | 80% → 89% |
+| hint | 22 | 3.4 → 3.1 | 14,641 → 12,231 | 77% → 89% |
+| miss | 123 | 3.5 → 3.5 | 15,634 → 16,971 | 64% → 67% |
+
+Gate verdicts against the judge's verdict on the same phase-A answer:
+
+| Gate | Judge | Answers |
+|---|---|---|
+| supported | correct | 63 |
+| supported | partial | 16 |
+| unsupported | correct | 54 |
+| unsupported | incorrect | 21 |
+| unsupported | partial | 46 |
+
+By how the phase-A answer that recorded the trail was judged:
+
+| Phase-A answer | Questions | Calls cold → warm | Judge cold → warm |
+|---|---|---|---|
+| correct | 117 | 3.1 → 2.4 | 79% → 85% |
+| incorrect | 21 | 4.2 → 4.0 | 50% → 45% |
+| partial | 62 | 3.6 → 3.2 | 60% → 67% |
