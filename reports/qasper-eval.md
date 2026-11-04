@@ -118,3 +118,61 @@ By how the phase-A answer that recorded the trail was judged:
 | correct | 221 | 4.0 → 2.6 | 84% → 88% |
 | incorrect | 106 | 4.3 → 3.5 | 18% → 19% |
 | partial | 73 | 4.1 → 3.4 | 51% → 57% |
+
+## Scenario: repeat-verified-v2 — lexical + embeddings
+
+Same as QASPER `repeat-verified`, with a verifier prompt that also rejects answers saying the cited sections do not cover the question (v2).
+
+- Warm-up questions: 400 (217 trails admitted)
+- Test questions: 400; exact normalized duplicates of a warm-up question: 1
+- Thresholds: hint ≥ 0.4, prefetch ≥ 0.5; LSH 42x3; recall budget 2000 tokens
+- Embedding matcher: BAAI/bge-small-en-v1.5 (cosine hint ≥ 0.88, prefetch ≥ 0.92; SimHash 30x16)
+
+| Mode | Questions | Share | Recalled nodes include gold (95% CI) | Mean similarity | Mean recall tokens |
+|---|---|---|---|---|---|
+| prefetch | 110 | 28% | 96/110 = 87% (80% to 92%) | 0.93 | 1036 |
+| hint | 48 | 12% | 40/48 = 83% (70% to 91%) | 0.89 | 96 |
+| miss | 242 | 60% | — | 0.12 | 0 |
+
+### Agent runs (repeat-verified-v2, lexical + embeddings)
+
+400 questions answered in both arms by `haiku` through `claude -p`; same tools, prompt and call cap.
+
+| Metric | cold | warm | Δ warm - cold | 95% CI |
+|---|---|---|---|---|
+| Tool calls (incl. recall) | 4.08 | 3.37 | -0.71 | -0.89 to -0.53 |
+| Docs tool calls | 3.08 | 2.37 | -0.71 | -0.89 to -0.53 |
+| Input tokens | 21,382 | 19,348 | -2,033 | -3,193 to -864 |
+| Seconds | 12.5 | 12.0 | -0.5 | -0.9 to -0.1 |
+| Saw a gold doc | 82.5% | 85.0% | +2.5% | -1.2% to +6.2% |
+| Answer token F1 | 0.093 | 0.099 | +0.006 | +0.001 to +0.010 |
+| Judge accuracy (n=400) | 60.8% | 60.0% | -0.8% | -3.8% to +2.4% |
+
+Judge: warm better on 40, cold better on 50; sign test p = 0.343.
+
+By warm recall mode:
+
+| Warm recall | Questions | Calls cold → warm | Input tokens cold → warm | Judge cold → warm |
+|---|---|---|---|---|
+| prefetch | 110 | 3.7 → 1.1 | 19,002 → 7,852 | 67% → 76% |
+| hint | 48 | 3.7 → 3.2 | 17,850 → 13,792 | 73% → 70% |
+| miss | 242 | 4.3 → 4.4 | 23,164 → 25,676 | 55% → 51% |
+
+Gate verdicts against the judge's verdict on the same phase-A answer:
+
+| Gate | Judge | Answers |
+|---|---|---|
+| supported | correct | 154 |
+| supported | incorrect | 27 |
+| supported | partial | 36 |
+| unsupported | correct | 67 |
+| unsupported | incorrect | 79 |
+| unsupported | partial | 37 |
+
+By how the phase-A answer that recorded the trail was judged:
+
+| Phase-A answer | Questions | Calls cold → warm | Judge cold → warm |
+|---|---|---|---|
+| correct | 221 | 4.0 → 2.9 | 84% → 85% |
+| incorrect | 106 | 4.3 → 4.1 | 18% → 12% |
+| partial | 73 | 4.1 → 3.8 | 51% → 53% |

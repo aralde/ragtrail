@@ -142,6 +142,59 @@ Verifier verdict against the judge's verdict on the same phase-A answer:
   Cold accuracy on those questions is already low, so there is little to lose, and a QASPER trail only ever serves
   its own paper.
 
+## Reference-free gate v2: also reject self-declared non-answers (WixQA n = 200, QASPER n = 400)
+
+The v1 verifier checks that an answer is supported by the cited nodes. Reading the 21 WixQA answers the judge called
+incorrect (`notes/e3-incorrect-admitted.md`), 19 say the docs do not cover the question and then give related facts
+from the cited nodes, which a support-only check passes. v2 is the same prompt with one more rule: an answer that says
+or implies the sources do not answer the question is unsupported, even if what it does say is in the sources. Same
+phase A, cold arm, scope settings and Haiku verifier as v1.
+
+Verifier verdict against the judge's verdict on the same phase-A answer:
+
+| WixQA (200) | Judge: correct | partial | incorrect | Admitted |
+|---|---|---|---|---|
+| v1 supported | 88 | 36 | 10 | 134 |
+| v1 unsupported | 29 | 26 | 11 | |
+| v2 supported | 63 | 16 | 0 | 79 |
+| v2 unsupported | 54 | 46 | 21 | |
+
+| QASPER (400) | Judge: correct | partial | incorrect | Admitted |
+|---|---|---|---|---|
+| v1 supported | 201 | 55 | 76 | 332 |
+| v1 unsupported | 20 | 18 | 30 | |
+| v2 supported | 154 | 36 | 27 | 217 |
+| v2 unsupported | 67 | 37 | 79 | |
+
+| | WixQA v1 | WixQA v2 | QASPER v1 | QASPER v2 |
+|---|---|---|---|---|
+| Incorrect answers admitted | 10 of 21 | **0 of 21** | 76 of 106 | **27 of 106** |
+| Correct answers rejected | 29 of 117 | 54 of 117 | 20 of 221 | 67 of 221 |
+| Admitted trails judged correct | 66% | 80% | 61% | 71% |
+| Recall fires (offline) | 127/200 | 77/200 | 236/400 | 158/400 |
+| Tool calls (cold: 3.40 / 4.08) | 2.40 (−1.00) | 2.81 (−0.59, CI −0.79 to −0.39) | 2.96 (−1.12) | 3.37 (−0.71, CI −0.89 to −0.53) |
+| Input tokens (cold: 15.0k / 21.4k) | 12.5k (−17%) | 13.9k (−8%) | 16.5k (−23%) | 19.3k (−10%) |
+| Judged correct (cold: 69.8% / 60.8%) | 74.0% (+4.2, CI −0.8 to +9.2) | **75.2%** (+5.5, CI +0.8 to +10.2, p = 0.052) | 64.1% (+3.4, CI +0.1 to +6.6) | 60.0% (−0.8, CI −3.8 to +2.4, p = 0.34) |
+
+| Phase-A answer | WixQA n | Cold | v1 | v2 | QASPER n | Cold | v1 | v2 |
+|---|---|---|---|---|---|---|---|---|
+| correct | 117 | 79% | 91% | 85% | 221 | 84% | 88% | 85% |
+| partial | 62 | 60% | 58% | 67% | 73 | 51% | 57% | 53% |
+| incorrect | 21 | 50% | 29% | 45% | 106 | 18% | 19% | 12% |
+
+- The rule does what it was written for: on WixQA no incorrect answer gets a trail, and the admitted trails are
+  80% correct. The price is coverage: 79 of 200 trails instead of 134, so fewer hits and smaller savings (−0.59
+  calls instead of −1.00).
+- On WixQA v2 has the best accuracy of the reference-free gates (+5.5, CI +0.8 to +10.2), but the sign test
+  (p = 0.052) and the overlap with v1's interval (+4.2) say the two are not distinguishable at n = 200.
+- The WixQA incorrect-first-answer row (50% → 45%) comes from questions that got no trail, so it is run-to-run
+  noise, not a cache effect.
+- QASPER is the opposite case: v2 admits far fewer incorrect answers (27 against 76) but accuracy does not improve
+  (−0.8, against +3.4 with v1). The extra 67 correct answers it rejects remove useful trails (correct-first-answer
+  group 88% → 85%), and the incorrect group was never hurt by v1 (18% → 19%), so there was little harm to remove.
+- v2 is a better gate where wrong trails matter (WixQA), v1 where hits are valuable and wrong trails are cheap
+  (QASPER). Neither gate removes the need for explicit feedback as the admission signal in a real deployment.
+
 ## How often the cache fires (offline, no LLM)
 
 | Setting | Recall fires | Recalled nodes hold the gold |
