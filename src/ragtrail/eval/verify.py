@@ -33,6 +33,50 @@ Reply with a JSON array, one object per item:
 
 VERDICTS = ("supported", "unsupported")
 
+# `claude -p` takes the prompt as one argv entry, which Linux caps at 128 KiB.
+MAX_PROMPT_BYTES = 100_000
+
+
+def _fit(item: dict[str, Any], limit: int) -> dict[str, Any]:
+    """Trim the item's sources evenly so its prompt fits `limit` bytes (a fitting item is returned as is).
+
+    >>> big = {"key": "k", "question": "q", "answer": "a", "sources": ["x" * 5000, "y" * 5000]}
+    >>> len(verify_prompt([_fit(big, 3000)]).encode()) <= 3000
+    True
+    >>> _fit({"key": "k", "sources": ["s"]}, 3000)["sources"]
+    ['s']
+    """
+    if len(verify_prompt([item]).encode()) <= limit:
+        return item
+    excess = len(verify_prompt([item]).encode()) - limit
+    sources = list(item["sources"])
+    total = sum(len(s) for s in sources)
+    keep = max(0, total - excess - 64 * len(sources))
+    trimmed = [s[: max(0, len(s) * keep // total)] + " …[trimmed]" for s in sources]
+    return {**item, "sources": trimmed}
+
+
+def batches(
+    items: Sequence[dict[str, Any]], batch_size: int, limit: int = MAX_PROMPT_BYTES
+) -> list[list[dict[str, Any]]]:
+    """Group items in order: at most `batch_size` and `limit` prompt bytes per batch; trim an oversized item.
+
+    >>> small = {"key": "a", "question": "q", "answer": "a", "sources": ["s"]}
+    >>> [len(b) for b in batches([small] * 7, 5)]
+    [5, 2]
+    >>> big = {**small, "sources": ["x" * 9000]}
+    >>> [len(b) for b in batches([big] * 3, 5, limit=12000)]
+    [1, 1, 1]
+    """
+    out: list[list[dict[str, Any]]] = []
+    for item in items:
+        item = _fit(item, limit)
+        if out and len(out[-1]) < batch_size and len(verify_prompt([*out[-1], item]).encode()) <= limit:
+            out[-1].append(item)
+        else:
+            out.append([item])
+    return out
+
 
 def verify_prompt(items: Sequence[dict[str, Any]]) -> str:
     """The prompt for one batch of `{key, question, answer, sources}` items.
@@ -78,14 +122,13 @@ def verify_runs(
     random.Random(seed).shuffle(shuffled)
     verdicts: dict[str, str] = {}
     with tempfile.TemporaryDirectory(prefix="ragtrail-verify-") as tmp:
-        for start in range(0, len(shuffled), batch_size):
-            batch = shuffled[start : start + batch_size]
+        for number, batch in enumerate(batches(shuffled, batch_size), start=1):
             out = parse_output(
                 invoke(text_command(verify_prompt(batch), model=model, system=SYSTEM), Path(tmp))
             )
             got = parse_support(str(out.get("result") or ""), [i["key"] for i in batch])
             verdicts.update(got)
-            echo(f"verified {len(got)}/{len(batch)} (batch {start // batch_size + 1})")
+            echo(f"verified {len(got)}/{len(batch)} (batch {number})")
     return verdicts
 
 
