@@ -45,6 +45,7 @@ class Scenario:
     phase_a_from: str | None = None
     gate: tuple[str, ...] | None = None
     gate_by: str = "judge"
+    gate_model: str = "haiku"
 
 
 SCENARIOS = {
@@ -115,6 +116,23 @@ SCENARIOS = {
         phase_a_from="repeat-self",
         gate=("supported",),
         gate_by="verify",
+    ),
+    ("wixqa", "repeat-verified-sonnet"): Scenario(
+        "wixqa",
+        "repeat-verified-sonnet",
+        "Same as `repeat-verified` (reference-free gate on the cited nodes' current text), with Sonnet "
+        "instead of Haiku as the verifier. Phase A and the cold arm are reused from `repeat-self` and "
+        "`repeat`.",
+        (TEST_SPLIT,),
+        PARAPHRASE_SPLIT,
+        None,
+        True,
+        trails="self",
+        cold_from="repeat",
+        phase_a_from="repeat-self",
+        gate=("supported",),
+        gate_by="verify",
+        gate_model="sonnet",
     ),
     ("qasper", "repeat"): Scenario(
         "qasper",
@@ -191,7 +209,7 @@ def _verify_path(args: argparse.Namespace, sc: Scenario, model: str, embed: bool
 def _gate_verdicts(args: argparse.Namespace, sc: Scenario) -> dict[str, str]:
     """Question id → gate verdict on its phase-A answer: the judge's, or the reference-free verifier's."""
     if sc.gate_by == "verify":
-        path = _verify_path(args, sc, args.gate_model)
+        path = _verify_path(args, sc, sc.gate_model)
         return dict(json.loads(path.read_text())) if path.exists() else {}
     return _phase_a_verdicts(args, sc, "sonnet")
 
@@ -398,7 +416,8 @@ def cmd_verify(args: argparse.Namespace) -> int:  # pragma: no cover - needs sub
     sc = _scenario(args)
     if sc.gate_by != "verify":
         raise SystemExit(f"error: scenario {sc.name!r} is not gated by the verifier")
-    path = _verify_path(args, sc, args.model)
+    model = args.model or sc.gate_model
+    path = _verify_path(args, sc, model)
     done: dict[str, str] = json.loads(path.read_text()) if path.exists() else {}
     by_id = {q.id: q for q in _questions(args, sc.warm)}
     items = []
@@ -420,7 +439,7 @@ def cmd_verify(args: argparse.Namespace) -> int:  # pragma: no cover - needs sub
             items.append(
                 {"key": run["id"], "question": q.question, "answer": run["answer"], "sources": sources}
             )
-    done.update(verify_runs(items, model=args.model))
+    done.update(verify_runs(items, model=model))
     path.write_text(json.dumps(done, indent=1), encoding="utf-8")
     print(f"{len(done)} verdicts in {path}: {sum(v == 'supported' for v in done.values())} supported")
     return 0
@@ -506,7 +525,7 @@ def cmd_report(args: argparse.Namespace) -> int:  # pragma: no cover - needs sub
                     if sc.gate_by == "verify":
                         from ragtrail.eval.verify import agreement
 
-                        gate_path = _verify_path(args, sc, "haiku", embed=bool(suffix))
+                        gate_path = _verify_path(args, sc, sc.gate_model, embed=bool(suffix))
                         gate = json.loads(gate_path.read_text()) if gate_path.exists() else {}
                         raw = _phase_a_verdicts(args, sc, args.judge, embed=bool(suffix))
                         counts = agreement(gate, raw)
@@ -703,7 +722,6 @@ def add_eval_parser(sub: Any) -> None:
     o.add_argument("--scenario", choices=sorted({name for _, name in SCENARIOS}), required=True)
     o.add_argument("--budget", type=int, default=2000, help="recall token budget")
     o.add_argument("--embed", nargs="?", const=DEFAULT_MODEL, help="also match by embeddings (model)")
-    o.add_argument("--gate-model", default="haiku", help="verifier whose verdicts gate a verified scenario")
     o.set_defaults(func=cmd_offline)
     a = cmds.add_parser("agent", help="run the cold/warm agent pilot (claude -p)")
     a.add_argument("--scenario", choices=sorted({name for _, name in SCENARIOS}), required=True)
@@ -743,7 +761,7 @@ def add_eval_parser(sub: Any) -> None:
         "verify", help="reference-free gate: are phase-A answers supported by their citations"
     )
     v.add_argument("--scenario", default="repeat-verified")
-    v.add_argument("--model", default="haiku", help="verifier model")
+    v.add_argument("--model", help="verifier model (default: the scenario's)")
     v.add_argument("--source-tokens", type=int, default=800, help="max tokens read per cited node")
     v.add_argument("--embed", nargs="?", const=DEFAULT_MODEL, help="same phase A as the embeddings runs")
     v.set_defaults(func=cmd_verify)
