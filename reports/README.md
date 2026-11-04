@@ -103,6 +103,45 @@ Verifier verdict against the judge's verdict on the same phase-A answer:
 - The incorrect-first-answer group is at 29% (n = 21), between self-recorded (21%) and the ideal gate (40%): the
   reference-free check removes about half of the harm, not all of it.
 
+## Reference-free gate on QASPER (paper as scope, n = 400)
+
+Same protocol as the WixQA gate, on long papers. Each paper is its own scope and the title is stripped before matching,
+so a trail can only be recalled for the paper it was recorded on. Phase A: the agent answers the 400 original questions
+with an empty cache and records the sections it cites. A verifier (Haiku, shown the question, the answer and the
+current text of the cited sections, never the reference) admits a trail only if the answer is supported: 332 of 400.
+Phase B runs the paraphrases. Same cold arm as above. The ungated self-recorded arm was not run on QASPER.
+
+| | Cold | Warm, oracle trails (title in the query) | Warm, reference-free gate |
+|---|---|---|---|
+| Recall fires (offline) | — | 400/400 (title match) | 236/400, 85% hold gold (164 prefetch, 72 hint) |
+| Tool calls | 4.08 | 1.48 | 2.96 (−1.12, CI −1.32 to −0.94) |
+| Input tokens | 21.4k | 9.2k | 16.5k (−23%) |
+| Seconds | 12.5 | 9.7 | 13.8 (+1.3, CI +0.7 to +1.9) |
+| Judged correct | 60.8% | **71.6%** (+10.9, CI +7.2 to +14.4) | 64.1% (+3.4, CI +0.1 to +6.6), sign test p = 0.18 |
+
+| Phase-A answer | n | Cold | Warm, reference-free gate |
+|---|---|---|---|
+| correct | 221 | 84% | 88% |
+| partial | 73 | 51% | 57% |
+| incorrect | 106 | 18% | 19% |
+
+Verifier verdict against the judge's verdict on the same phase-A answer:
+
+| Verifier | Judge: correct | Judge: partial | Judge: incorrect | Total |
+|---|---|---|---|---|
+| supported (admitted) | 201 | 55 | 76 | 332 |
+| unsupported (rejected) | 20 | 18 | 30 | 68 |
+
+- Savings hold on long papers: −27% tool calls and −23% input tokens, from the prefetch hits (163 questions in the runs), which need 1.4 calls
+  instead of 3.9. The warm arm is slower in wall-clock time (+1.3 s), because misses still pay for the recall call.
+- Accuracy is above cold, with a CI that just excludes zero (+0.1 to +6.6) and a sign test that does not (p = 0.18).
+  Treat it as "no loss, small gain", not a significant gain.
+- The verifier is permissive here: it admits 76 of 106 incorrect answers (72%; WixQA: 48%) and rejects 20 of 221
+  correct ones (9%). Admitted trails were judged correct 61% of the time (201/332), against 55% over all 400.
+- Wrong trails did not hurt: the incorrect-first-answer group stays at 18% → 19% (WixQA self-recorded: 50% → 21%).
+  Cold accuracy on those questions is already low, so there is little to lose, and a QASPER trail only ever serves
+  its own paper.
+
 ## How often the cache fires (offline, no LLM)
 
 | Setting | Recall fires | Recalled nodes hold the gold |
