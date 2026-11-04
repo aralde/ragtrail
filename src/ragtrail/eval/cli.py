@@ -47,6 +47,7 @@ class Scenario:
     gate: tuple[str, ...] | None = None
     gate_by: str = "judge"
     gate_model: str = "haiku"
+    gate_prompt: str = "v1"
     scoped: bool = False
 
 
@@ -136,6 +137,23 @@ SCENARIOS = {
         gate_by="verify",
         gate_model="sonnet",
     ),
+    ("wixqa", "repeat-verified-v2"): Scenario(
+        "wixqa",
+        "repeat-verified-v2",
+        "Same as `repeat-verified`, with a verifier prompt that also rejects answers saying the cited nodes "
+        "do not cover the question (v2). Phase A and the cold arm are reused from `repeat-self` and "
+        "`repeat`.",
+        (TEST_SPLIT,),
+        PARAPHRASE_SPLIT,
+        None,
+        True,
+        trails="self",
+        cold_from="repeat",
+        phase_a_from="repeat-self",
+        gate=("supported",),
+        gate_by="verify",
+        gate_prompt="v2",
+    ),
     ("qasper", "repeat"): Scenario(
         "qasper",
         "repeat",
@@ -175,6 +193,23 @@ SCENARIOS = {
         phase_a_from="repeat-self",
         gate=("supported",),
         gate_by="verify",
+        scoped=True,
+    ),
+    ("qasper", "repeat-verified-v2"): Scenario(
+        "qasper",
+        "repeat-verified-v2",
+        "Same as QASPER `repeat-verified`, with a verifier prompt that also rejects answers saying the cited "
+        "sections do not cover the question (v2).",
+        (QASPER_SPLIT,),
+        PARAPHRASE_SPLIT,
+        None,
+        True,
+        trails="self",
+        cold_from="repeat",
+        phase_a_from="repeat-self",
+        gate=("supported",),
+        gate_by="verify",
+        gate_prompt="v2",
         scoped=True,
     ),
 }
@@ -235,7 +270,8 @@ def _phase_a_verdicts(
 
 
 def _verify_path(args: argparse.Namespace, sc: Scenario, model: str, embed: bool | None = None) -> Path:
-    return _dir(args) / f"verify-{_phase_a_name(args, sc, embed)}.{model}.json"
+    suffix = "" if sc.gate_prompt == "v1" else f".{sc.gate_prompt}"
+    return _dir(args) / f"verify-{_phase_a_name(args, sc, embed)}.{model}{suffix}.json"
 
 
 def _gate_verdicts(args: argparse.Namespace, sc: Scenario) -> dict[str, str]:
@@ -520,7 +556,7 @@ def cmd_verify(args: argparse.Namespace) -> int:  # pragma: no cover - needs sub
             items.append(
                 {"key": run["id"], "question": q.question, "answer": run["answer"], "sources": sources}
             )
-    done.update(verify_runs(items, model=model))
+    done.update(verify_runs(items, model=model, prompt_version=sc.gate_prompt))
     path.write_text(json.dumps(done, indent=1), encoding="utf-8")
     print(f"{len(done)} verdicts in {path}: {sum(v == 'supported' for v in done.values())} supported")
     return 0
