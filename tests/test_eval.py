@@ -260,3 +260,30 @@ def test_recall_rows_maps_sections_to_gold_docs() -> None:
     assert not recall_rows(store, resolver, test, "eval", budget_tokens=500)[0].gold_hit
     rows = recall_rows(store, resolver, test, "eval", budget_tokens=500, doc_of={"n70": "doc7"}.get)
     assert rows[0].gold_hit
+
+
+def test_verifier_v2_prompt_and_file_names(tmp_path: Path) -> None:
+    import argparse
+
+    from ragtrail.eval.cli import SCENARIOS, _verify_path
+    from ragtrail.eval.verify import verify_prompt, verify_runs
+
+    item = {"key": "a", "question": "q", "answer": "x", "sources": ["s"]}
+    assert verify_prompt([item]) == verify_prompt([item], "v1")
+    assert "do not answer the question" in verify_prompt([item], "v2")
+    seen: list[str] = []
+
+    def fake(cmd: list[str], cwd: Path) -> str:
+        seen.append(cmd[2])
+        return json.dumps({"result": '[{"key": "a", "verdict": "unsupported"}]'})
+
+    assert verify_runs([item], invoke=fake, echo=lambda s: None, prompt_version="v2") == {"a": "unsupported"}
+    assert "do not answer the question" in seen[0]
+
+    args = argparse.Namespace(data=tmp_path, dataset="wixqa", embed=True)
+    v1, v2 = SCENARIOS[("wixqa", "repeat-verified")], SCENARIOS[("wixqa", "repeat-verified-v2")]
+    assert (v1.gate_prompt, v2.gate_prompt) == ("v1", "v2")
+    assert _verify_path(args, v1, "haiku").name == "verify-repeat-self-embed-phaseA.haiku.json"
+    assert _verify_path(args, v2, "haiku").name == "verify-repeat-self-embed-phaseA.haiku.v2.json"
+    qv2 = SCENARIOS[("qasper", "repeat-verified-v2")]
+    assert qv2.scoped and qv2.gate_prompt == "v2"
