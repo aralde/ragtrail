@@ -29,6 +29,7 @@ PARAPHRASE_SPLIT = "paraphrase"
 
 
 _TITLED = re.compile(r'^About "(?P<title>.+?)": (?P<question>.*)$', re.DOTALL)
+TITLE_CONTEXT = r'^About ".+?": '
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class Scenario:
     gate: tuple[str, ...] | None = None
     gate_by: str = "judge"
     gate_model: str = "haiku"
+    scoped: bool = False
 
 
 SCENARIOS = {
@@ -145,6 +147,36 @@ SCENARIOS = {
         None,
         True,
     ),
+    ("qasper", "repeat-self"): Scenario(
+        "qasper",
+        "repeat-self",
+        "Realistic QASPER: each paper is its own scope and recall matches the question without the paper "
+        "title. Phase A: the agent answers the 400 titled questions with an empty cache and records its own "
+        "trails; test on the paraphrases. The cold arm is reused from `repeat` (no cache, same questions).",
+        (QASPER_SPLIT,),
+        PARAPHRASE_SPLIT,
+        None,
+        True,
+        trails="self",
+        cold_from="repeat",
+        scoped=True,
+    ),
+    ("qasper", "repeat-verified"): Scenario(
+        "qasper",
+        "repeat-verified",
+        "Like QASPER `repeat-self`, but a trail is admitted only when a verifier (shown the question, the "
+        "phase-A answer and the cited sections' current text, never the reference) says it is supported.",
+        (QASPER_SPLIT,),
+        PARAPHRASE_SPLIT,
+        None,
+        True,
+        trails="self",
+        cold_from="repeat",
+        phase_a_from="repeat-self",
+        gate=("supported",),
+        gate_by="verify",
+        scoped=True,
+    ),
 }
 
 CORPUS_NAMES = {"wixqa": "the Wix help center", "qasper": "a collection of NLP research papers"}
@@ -212,6 +244,30 @@ def _gate_verdicts(args: argparse.Namespace, sc: Scenario) -> dict[str, str]:
         path = _verify_path(args, sc, sc.gate_model)
         return dict(json.loads(path.read_text())) if path.exists() else {}
     return _phase_a_verdicts(args, sc, "sonnet")
+
+
+def _scope_of(args: argparse.Namespace, sc: Scenario) -> Any:  # pragma: no cover - needs subforest
+    """For a scoped scenario: question → "p<doc>" (the paper holding its first gold section); else None."""
+    if not sc.scoped:
+        return None
+    doc_of = _doc_of(corpus_path(args.data, args.dataset))
+
+    def scope_of(q: EvalQuestion) -> str:
+        doc = doc_of(q.gold[0]) if q.gold else None
+        if doc is None:
+            raise SystemExit(f"error: no paper found for question {q.id}")
+        return f"p{doc.lstrip('n')}"
+
+    return scope_of
+
+
+def _bare(text: str) -> str:
+    """The question without its fixed title context.
+
+    >>> _bare('About "BERT": Which datasets?')
+    'Which datasets?'
+    """
+    return re.sub(TITLE_CONTEXT, "", text).strip()
 
 
 def _doc_of(corpus: Path) -> Any:  # pragma: no cover - needs subforest
@@ -299,10 +355,22 @@ def cmd_offline(args: argparse.Namespace) -> int:  # pragma: no cover - needs su
                     raise SystemExit(f"error: no gate verdicts yet; run {step} first")
                 runs = [run for run in runs if verdicts.get(run["id"]) in sc.gate]
             outcome = "feedback" if sc.gate else None
-            records = [
-                {**r, "outcome": outcome or r.get("outcome")} for run in runs for r in run.get("records", [])
-            ]
-            admitted = warm_from_records(store, SubforestResolver(tree), records, "eval", embedder=embedder)
+            scope_of = _scope_of(args, sc)
+            by_id = {q.id: q for q in warm}
+            admitted = 0
+            for run in runs:
+                scope = scope_of(by_id[run["id"]]) if scope_of else "eval"
+                records = [
+                    {
+                        **r,
+                        "query": _bare(str(r.get("query") or "")) if sc.scoped else r.get("query"),
+                        "outcome": outcome or r.get("outcome"),
+                    }
+                    for r in run.get("records", [])
+                ]
+                admitted += warm_from_records(
+                    store, SubforestResolver(tree), records, scope, embedder=embedder
+                )
         else:
             admitted = warm_up(store, SubforestResolver(tree), warm, "eval", embedder=embedder)
     scratch = db.with_suffix(".scoring.db")
@@ -310,15 +378,21 @@ def cmd_offline(args: argparse.Namespace) -> int:  # pragma: no cover - needs su
         db, scratch
     )  # recall bumps hit counters; score on a copy so the warm store stays as built
     with TreeStore(corpus_path(args.data, args.dataset)) as tree, SQLiteStore(scratch) as store:
-        rows = recall_rows(
-            store,
-            SubforestResolver(tree),
-            test,
-            "eval",
-            budget_tokens=args.budget,
-            embedder=embedder,
-            doc_of=_doc_of(corpus_path(args.data, args.dataset)),
-        )
+        scope_of = _scope_of(args, sc)
+        doc_of = _doc_of(corpus_path(args.data, args.dataset))
+        rows = [
+            row
+            for q in test
+            for row in recall_rows(
+                store,
+                SubforestResolver(tree),
+                [q.model_copy(update={"question": _bare(q.question)}) if sc.scoped else q],
+                scope_of(q) if scope_of else "eval",
+                budget_tokens=args.budget,
+                embedder=embedder,
+                doc_of=doc_of,
+            )
+        ]
     scratch.unlink()
     dev = None
     if sc.dev is not None:
@@ -360,7 +434,11 @@ def cmd_agent(args: argparse.Namespace) -> int:  # pragma: no cover - needs the 
 
     sc = _scenario(args)
     config = AgentConfig(
-        model=args.model, max_calls=args.max_calls, embed=args.embed, corpus_name=CORPUS_NAMES[args.dataset]
+        model=args.model,
+        max_calls=args.max_calls,
+        embed=args.embed,
+        corpus_name=CORPUS_NAMES[args.dataset],
+        strip_context=TITLE_CONTEXT if sc.scoped else None,
     )
     run_agent(
         _pilot(args, sc),
@@ -371,6 +449,7 @@ def cmd_agent(args: argparse.Namespace) -> int:  # pragma: no cover - needs the 
         config=config,
         max_runs=args.max_runs,
         arms=("warm",) if sc.cold_from else ("cold", "warm"),
+        scope_of=_scope_of(args, sc),
     )
     return 0
 
@@ -391,6 +470,7 @@ def cmd_selfrecord(args: argparse.Namespace) -> int:  # pragma: no cover - needs
         embed=args.embed,
         corpus_name=CORPUS_NAMES[args.dataset],
         allow_record=True,
+        strip_context=TITLE_CONTEXT if sc.scoped else None,
     )
     run_agent(
         _questions(args, sc.warm),
@@ -401,6 +481,7 @@ def cmd_selfrecord(args: argparse.Namespace) -> int:  # pragma: no cover - needs
         config=config,
         max_runs=args.max_runs,
         arms=("cold",),
+        scope_of=_scope_of(args, sc),
     )
     return 0
 
