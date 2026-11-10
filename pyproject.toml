@@ -9,9 +9,24 @@ authors = [
     { name = "Ariel A.", email = "ariel.deibe@gmail.com" }
 ]
 requires-python = ">=3.11"
+keywords = ["rag", "agents", "cache", "retrieval", "mcp", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
 dependencies = [
     "pydantic>=2.14.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/aralde/ragtrail"
+Issues = "https://github.com/aralde/ragtrail/issues"
+Blog = "https://aralde.dev/blog/building-ragtrail"
 
 [project.scripts]
 ragtrail = "ragtrail.cli:main"
