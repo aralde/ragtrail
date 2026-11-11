@@ -11,7 +11,8 @@ It caches the path, never the answer.
 [![CI](https://github.com/aralde/ragtrail/actions/workflows/ci.yml/badge.svg)](https://github.com/aralde/ragtrail/actions/workflows/ci.yml)
 
 > Status: alpha (0.1.0, not on PyPI yet). The core, the MCP server and the evaluation harness work and are tested;
-> the cloud stores in [`PLAN.md`](PLAN.md) (M6–M8) are not built. Write-up:
+> the cloud stores in [`PLAN.md`](PLAN.md) (M6–M8) are not built. The public API may change between 0.x
+> releases. Write-up:
 > [Building ragtrail](https://aralde.dev/blog/building-ragtrail).
 
 ## Install
