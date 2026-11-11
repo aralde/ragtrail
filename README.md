@@ -8,7 +8,69 @@ agent skips the orientation phase. Paths are invalidated by content hash when th
 
 It caches the path, never the answer.
 
-> Status: early development. See `PLAN.md`.
+[![CI](https://github.com/aralde/ragtrail/actions/workflows/ci.yml/badge.svg)](https://github.com/aralde/ragtrail/actions/workflows/ci.yml)
+
+> Status: alpha (0.1.0, not on PyPI yet). The core, the MCP server and the evaluation harness work and are tested;
+> the cloud stores in [`PLAN.md`](PLAN.md) (M6–M8) are not built. Write-up:
+> [Building ragtrail](https://aralde.dev/blog/building-ragtrail).
+
+## Install
+
+```bash
+pip install 'git+https://github.com/aralde/ragtrail.git'            # core: stdlib + sqlite3 + pydantic
+pip install 'ragtrail[mcp,embed] @ git+https://github.com/aralde/ragtrail.git'   # MCP server, embedding matcher
+```
+
+Python 3.11 or newer.
+
+## Use it from Python
+
+Wrap one agent turn. On entry you get the recalled path (if any); on exit an accepted turn is stored.
+
+```python
+from ragtrail import GenericResolver, SQLiteStore, turn
+from ragtrail.resolver import text_hash
+
+resolver = GenericResolver(
+    hash_fn=lambda node_id: text_hash(docs[node_id]) if node_id in docs else None,  # None = deleted
+    read_fn=lambda node_id, max_tokens: docs[node_id],
+)
+
+with SQLiteStore("trails.db") as store:
+    with turn(store, resolver, scope="my-team", query=question) as t:
+        if t.recall.mode != "miss":
+            print(t.recall.rendered)  # nodes to start from, or their current text
+        # ... run your agent, record what it did and what it cited ...
+        t.step("search", {"query": question}, found_ids)
+        t.cite(cited_ids)
+        t.accept("verified")  # no accept, no trail
+```
+
+A runnable version over plain chunk ids is in [`examples/chunk_rag.py`](examples/chunk_rag.py); the subforest one is
+[`examples/subforest_rag.py`](examples/subforest_rag.py).
+
+## How it works
+
+1. **Match.** The question is normalized and matched against stored questions with MinHash/LSH (stdlib only), or by
+   embeddings if you enable them. Lookup is a handful of key reads, so any key-value store can back it.
+2. **Validate.** Every cited node is re-hashed against the live index. All unchanged: `prefetch` (current node text,
+   within a token budget). Some changed: `hint` with only the still-valid nodes. All changed: `miss`, and the trail
+   is marked stale.
+3. **Admit.** A trail is written only with a positive signal (verified citations, user feedback, or an explicit
+   accept). Scopes (tenant, document, permission group) never mix.
+
+Design decisions, with the numbers that drove them, are in [`docs/decisions.md`](docs/decisions.md).
+
+## Limitations
+
+- Savings come only from repeated or reworded questions; the evaluation uses model-written repeats, so real traffic
+  will save less.
+- Hash validation catches *changed* nodes, not *new* documents that would now be better evidence; only the TTL
+  covers that.
+- Admission quality decides safety. A path from a wrong answer sends the agent back to the same mistake.
+- Evaluated with one agent model (Haiku) and one judge (Sonnet, checked on 40 labels, not human-labelled).
+- The evaluation harness needs [subforest](https://github.com/aralde/subforest) and the `claude` CLI; the library
+  itself does not depend on either.
 
 ## MCP server
 
@@ -100,9 +162,11 @@ fix, tenant isolation, and admission gating. Pass a name (`freshness`, `fixed-co
 ## Development
 
 ```bash
-uv sync
-uv run ruff check . && uv run mypy src && uv run pytest
+uv sync --all-extras
+uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest
 ```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 
