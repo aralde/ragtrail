@@ -9,8 +9,9 @@ agent skips the orientation phase. Paths are invalidated by content hash when th
 It caches the path, never the answer.
 
 [![CI](https://github.com/aralde/ragtrail/actions/workflows/ci.yml/badge.svg)](https://github.com/aralde/ragtrail/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/ragtrail)](https://pypi.org/project/ragtrail/)
 
-> Status: alpha (0.1.0, not on PyPI yet). The core, the MCP server and the evaluation harness work and are tested;
+> Status: alpha (0.1.0, on PyPI). The core, the MCP server and the evaluation harness work and are tested;
 > the cloud stores in [`PLAN.md`](PLAN.md) (M6–M8) are not built. The public API may change between 0.x
 > releases. Write-up:
 > [Building ragtrail](https://aralde.dev/blog/building-ragtrail).
@@ -18,8 +19,8 @@ It caches the path, never the answer.
 ## Install
 
 ```bash
-pip install 'git+https://github.com/aralde/ragtrail.git'            # core: stdlib + sqlite3 + pydantic
-pip install 'ragtrail[mcp,embed] @ git+https://github.com/aralde/ragtrail.git'   # MCP server, embedding matcher
+pip install ragtrail                  # core: stdlib + sqlite3 + pydantic
+pip install 'ragtrail[mcp,embed]'     # MCP server, embedding matcher
 ```
 
 Python 3.11 or newer.
