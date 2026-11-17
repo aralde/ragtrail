@@ -1,4 +1,4 @@
-"""Command-line interface: `ragtrail serve` (MCP over stdio), `stats` and `purge`."""
+"""Command-line interface: `ragtrail serve` (MCP over stdio), `stats`, `export` and `purge`."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from ragtrail.embed import DEFAULT_MODEL
+from ragtrail.export import DEFAULT_MAX_TOKENS
 from ragtrail.recall import DEFAULT_BUDGET_TOKENS
 from ragtrail.resolver import NodeResolver
 from ragtrail.stats import DEFAULT_TOKENS_PER_CALL
@@ -33,7 +34,8 @@ def load_resolver(spec: str) -> NodeResolver:
     return resolver
 
 
-def _subforest_resolver(db: Path) -> NodeResolver:
+def subforest_resolver(db: Path) -> NodeResolver:
+    """`SubforestResolver` over a subforest corpus DB (needs subforest installed)."""
     try:
         subforest = importlib.import_module("subforest")
     except ImportError:
@@ -55,7 +57,7 @@ def _serve(args: argparse.Namespace) -> int:
             if not args.subforest.exists():
                 print(f"error: {args.subforest} does not exist", file=sys.stderr)
                 return 2
-            resolver = _subforest_resolver(args.subforest)
+            resolver = subforest_resolver(args.subforest)
         elif args.resolver is not None:
             resolver = load_resolver(args.resolver)
     except (RuntimeError, ValueError, TypeError, ImportError, AttributeError) as exc:
@@ -117,6 +119,47 @@ def _stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def _export(args: argparse.Namespace) -> int:
+    from ragtrail.export import export_problems, export_script, find_trail, open_resolver
+
+    if (args.trail is None) == (args.query is None):
+        print("error: give a trail id or --query, not both", file=sys.stderr)
+        return 2
+    try:
+        resolver = open_resolver(args.resolver, args.subforest)
+    except (RuntimeError, ValueError, TypeError, ImportError, AttributeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    with _open_store(args.db) as store:
+        if args.trail is not None:
+            trajectory = store.get(args.scope, args.trail)
+            if trajectory is None:
+                print(f"error: no live trail {args.trail!r} in scope {args.scope!r}", file=sys.stderr)
+                return 1
+            problems = export_problems(trajectory, resolver)
+            if problems:
+                print(f"error: trail {trajectory.id} is not stable: {'; '.join(problems)}", file=sys.stderr)
+                return 1
+        else:
+            trajectory = find_trail(store, resolver, args.query, args.scope)
+            if trajectory is None:
+                print("error: no stable trail matches this question at prefetch level", file=sys.stderr)
+                return 1
+    script = export_script(
+        trajectory,
+        resolver=args.resolver,
+        subforest=args.subforest,
+        max_tokens=args.max_tokens,
+    )
+    if args.output is None:
+        sys.stdout.write(script)
+    else:
+        args.output.write_text(script, encoding="utf-8")
+        args.output.chmod(0o755)
+        print(f"exported trail {trajectory.id} to {args.output}", file=sys.stderr)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The `ragtrail` argument parser.
 
@@ -172,6 +215,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     stats.set_defaults(func=_stats)
 
+    export = sub.add_parser(
+        "export", help="write a stable trail as a hash-checked fetch script (documents only, no answer)"
+    )
+    export.add_argument("trail", nargs="?", help="trail id to export")
+    export.add_argument("--query", help="export the stable trail that matches this question instead")
+    export.add_argument("--db", required=True, help="SQLite file of trails or a postgresql:// URL")
+    export.add_argument("--scope", default="default")
+    export_index = export.add_mutually_exclusive_group(required=True)
+    export_index.add_argument("--subforest", type=Path, help="subforest corpus DB the script reads from")
+    export_index.add_argument("--resolver", help="module:factory returning the NodeResolver the script uses")
+    export.add_argument(
+        "--max-tokens",
+        type=int,
+        default=DEFAULT_MAX_TOKENS,
+        help="token cap passed to the resolver for each node read",
+    )
+    export.add_argument("-o", "--output", type=Path, help="write the script here (default: stdout)")
+    export.set_defaults(func=_export)
+
     purge = sub.add_parser("purge", help="delete expired trails")
     purge.add_argument("--db", required=True)
     purge.set_defaults(func=_purge)
@@ -186,9 +248,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         and getattr(args, "budget", 1) >= 1
         and getattr(args, "days", 1) > 0
         and getattr(args, "tokens_per_call", 1) >= 1
+        and getattr(args, "max_tokens", 1) >= 1
     )
     if not positive:
-        print("error: --ttl-days, --budget, --days and --tokens-per-call must be positive", file=sys.stderr)
+        print(
+            "error: --ttl-days, --budget, --days, --tokens-per-call and --max-tokens must be positive",
+            file=sys.stderr,
+        )
         return 2
     scope = getattr(args, "scope", "default")
     if not scope or "#" in scope:
