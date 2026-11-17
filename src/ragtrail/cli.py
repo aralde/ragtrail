@@ -6,6 +6,7 @@ import argparse
 import importlib
 import sys
 from collections.abc import Sequence
+from contextlib import AbstractContextManager
 from datetime import timedelta
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from ragtrail.embed import DEFAULT_MODEL
 from ragtrail.recall import DEFAULT_BUDGET_TOKENS
 from ragtrail.resolver import NodeResolver
 from ragtrail.stats import DEFAULT_TOKENS_PER_CALL
-from ragtrail.store import SQLiteStore
+from ragtrail.store import SQLiteStore, TrajectoryStore
 
 
 def load_resolver(spec: str) -> NodeResolver:
@@ -71,7 +72,7 @@ def _serve(args: argparse.Namespace) -> int:
             return 2
     if resolver is None:
         print("ragtrail: no index attached (--subforest/--resolver); running unverified", file=sys.stderr)
-    with SQLiteStore(args.db) as store:
+    with _open_store(args.db) as store:
         server = create_server(
             store,
             resolver,
@@ -87,8 +88,16 @@ def _serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _open_store(db: str) -> AbstractContextManager[TrajectoryStore]:
+    if db.startswith(("postgresql://", "postgres://")):
+        from ragtrail.postgres import PostgresStore
+
+        return PostgresStore(db)
+    return SQLiteStore(db)
+
+
 def _purge(args: argparse.Namespace) -> int:
-    with SQLiteStore(args.db) as store:
+    with _open_store(args.db) as store:
         print(f"purged {store.purge_expired()} expired trajectories")
     return 0
 
@@ -118,7 +127,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     serve = sub.add_parser("serve", help="serve recall/record as an MCP server over stdio")
-    serve.add_argument("--db", type=Path, required=True, help="SQLite file for trails (created if missing)")
+    serve.add_argument(
+        "--db", required=True, help="SQLite file for trails (created if missing) or a postgresql:// URL"
+    )
     serve.add_argument("--scope", default="default", help="tenant / permission group this server serves")
     index = serve.add_mutually_exclusive_group()
     index.add_argument("--subforest", type=Path, help="subforest corpus DB used to check and read nodes")
@@ -162,7 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     stats.set_defaults(func=_stats)
 
     purge = sub.add_parser("purge", help="delete expired trails")
-    purge.add_argument("--db", type=Path, required=True)
+    purge.add_argument("--db", required=True)
     purge.set_defaults(func=_purge)
     return parser
 

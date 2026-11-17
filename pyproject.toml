@@ -35,6 +35,9 @@ ragtrail = "ragtrail.cli:main"
 mcp = [
     "mcp>=2.3",
 ]
+postgres = [
+    "psycopg[binary]>=3.2",
+]
 embed = [
     "fastembed>=0.7",
 ]
