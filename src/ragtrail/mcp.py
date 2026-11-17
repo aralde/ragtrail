@@ -181,11 +181,11 @@ def create_server(
         )
 
     def do_reject(query: str) -> CallToolResult:
-        demoted = reject_trails(store, bare(query), scope, config=config, embedder=embedder)
+        demoted = reject_trails(store, active, bare(query), scope, config=config, embedder=embedder)
         if not demoted:
             return _result("No recalled path matches this question; nothing to demote.", {"rejected": []})
         return _result(
-            f"Demoted {len(demoted)} path(s): they will not be served for this question again.",
+            f"Demoted {len(demoted)} path(s): it will not be served for this question again.",
             {"rejected": demoted},
         )
 

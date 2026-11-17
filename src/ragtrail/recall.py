@@ -263,6 +263,7 @@ def _decide(
 
 def reject(
     store: TrajectoryStore,
+    resolver: NodeResolver,
     query: str,
     scope: str,
     *,
@@ -270,10 +271,11 @@ def reject(
     embedder: Embedder | None = None,
     embed_config: EmbedConfig = DEFAULT_EMBED_CONFIG,
 ) -> list[str]:
-    """Report that the answer to `query` was rejected: demote the trails `recall` would serve for it.
+    """Report that the answer to `query` was rejected: demote the trail `recall` would serve for it.
 
-    Every matching trail in `scope` gets a rejection and is no longer recalled; the next answer to the
-    question, once accepted, records a fresh trail. Returns the ids of the demoted trails.
+    Only that trail (the first non-rejected match whose useful nodes still have a valid hash) gets a
+    rejection and is no longer recalled; other matching trails stay available. Returns the ids of the
+    demoted trails: empty or one.
 
     >>> from ragtrail.recorder import Recorder
     >>> from ragtrail.resolver import GenericResolver, text_hash
@@ -282,7 +284,7 @@ def reject(
     >>> store = SQLiteStore(":memory:")
     >>> rec = Recorder(store, resolver, scope="acme", query="When do access tokens expire?")
     >>> rec.cite(["n33"]); _ = rec.commit("verified")
-    >>> len(reject(store, "when do the access tokens expire", "acme"))
+    >>> len(reject(store, resolver, "when do the access tokens expire", "acme"))
     1
     >>> recall(store, resolver, "when do the access tokens expire", "acme").mode
     'miss'
@@ -299,7 +301,13 @@ def reject(
     ranked = _rank(
         store.candidates(scope, keys), sig, config, vector, embedder.name if embedder else None, embed_config
     )
-    demoted = [m.trajectory.id for m in ranked if m.level > 0 and not m.trajectory.rejections]
-    for trajectory_id in demoted:
-        store.incr_rejections(scope, trajectory_id)
-    return demoted
+    for match in ranked:
+        if match.level == 0:
+            break
+        trajectory = match.trajectory
+        if trajectory.rejections:
+            continue
+        if any(resolver.content_hash(r.node_id) == r.content_hash for r in trajectory.useful):
+            store.incr_rejections(scope, trajectory.id)
+            return [trajectory.id]
+    return []

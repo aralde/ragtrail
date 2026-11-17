@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ragtrail.recall import recall, render
+from ragtrail.recall import recall, reject, render
 from ragtrail.recorder import Recorder
 from ragtrail.store import SQLiteStore
 from tests.corpus import Corpus, ScriptedAgent
@@ -202,3 +202,25 @@ class TestAdmission:
         t = rec.commit("verified")
         assert t is not None
         assert corpus.texts["n70"] not in t.model_dump_json()
+
+
+def test_reject_demotes_only_the_served_trail(store: SQLiteStore, corpus: Corpus) -> None:
+    record(store, corpus, "How do I refresh an expired access token?", ["n35"])
+    record(store, corpus, "Refresh expired access token", ["n33"])
+    resolver = corpus.resolver()
+    served = recall(store, resolver, "Refresh expired access token", "acme")
+    assert served.trajectory_id is not None and [n.node_id for n in served.nodes] == ["n33"]
+    assert reject(store, resolver, "Refresh expired access token", "acme") == [served.trajectory_id]
+    other = recall(store, resolver, "Refresh expired access token", "acme")
+    assert other.mode != "miss"
+    assert other.trajectory_id != served.trajectory_id and [n.node_id for n in other.nodes] == ["n35"]
+
+
+def test_reject_skips_trails_with_no_valid_nodes(store: SQLiteStore, corpus: Corpus) -> None:
+    record(store, corpus, "Refresh expired access token", ["n33"])
+    record(store, corpus, "How do I refresh an expired access token?", ["n35"])
+    corpus.edit("n33", "changed")
+    resolver = corpus.resolver()
+    demoted = reject(store, resolver, "Refresh expired access token", "acme")
+    assert len(demoted) == 1
+    assert [n.node_id for n in recall(store, resolver, "Refresh expired access token", "acme").nodes] == []
