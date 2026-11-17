@@ -83,4 +83,4 @@ hash it gets `hint` without that node; after changing all, `miss`.
 - [x] Optional embedding matcher for far paraphrases (`ragtrail[embed]`), done after M5 (see decisions)
 - Consume change events from an incremental indexer to invalidate proactively instead of on read
 - Trail analytics: most reused nodes, dead trails, hit rate per scope
-- Thin TypeScript client over the HTTP/MCP contract (`ragtrail` on npm)
+- [x] Thin TypeScript client over the MCP contract, with an astorlm hook (`clients/typescript`; not on npm yet)
