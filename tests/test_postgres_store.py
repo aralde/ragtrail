@@ -147,3 +147,13 @@ def test_rejects_bad_band_cap(dsn: str) -> None:
 
     with pytest.raises(ValueError):
         PostgresStore(dsn, band_cap=0)
+
+
+def test_incr_rejections_persists(store) -> None:  # type: ignore[no-untyped-def]
+    t = traj()
+    store.put(t, [])
+    assert store.incr_rejections("acme", t.id) == 1
+    assert store.incr_rejections("acme", t.id) == 2
+    got = store.get("acme", t.id)
+    assert got is not None and got.rejections == 2
+    assert store.incr_rejections("acme", "missing") == 0

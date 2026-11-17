@@ -1,4 +1,4 @@
-"""Command-line interface: `ragtrail serve` (MCP over stdio) and `ragtrail purge`."""
+"""Command-line interface: `ragtrail serve` (MCP over stdio), `stats` and `purge`."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pathlib import Path
 from ragtrail.embed import DEFAULT_MODEL
 from ragtrail.recall import DEFAULT_BUDGET_TOKENS
 from ragtrail.resolver import NodeResolver
+from ragtrail.stats import DEFAULT_TOKENS_PER_CALL
 from ragtrail.store import SQLiteStore, TrajectoryStore
 
 
@@ -101,6 +102,21 @@ def _purge(args: argparse.Namespace) -> int:
     return 0
 
 
+def _stats(args: argparse.Namespace) -> int:
+    from ragtrail.stats import compute_stats, format_stats, read_log
+
+    for path in (args.db, args.log):
+        if not path.exists():
+            print(f"error: {path} does not exist", file=sys.stderr)
+            return 2
+    with SQLiteStore(args.db) as store:
+        stats = compute_stats(
+            read_log(args.log), store, args.scope, days=args.days, tokens_per_call=args.tokens_per_call
+        )
+    print(format_stats(stats, args.scope))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The `ragtrail` argument parser.
 
@@ -141,6 +157,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_eval_parser(sub)
 
+    stats = sub.add_parser(
+        "stats", help="recalls by mode, estimated savings and worst trails from a serve log"
+    )
+    stats.add_argument("--db", type=Path, required=True, help="SQLite file of trails")
+    stats.add_argument("--log", type=Path, required=True, help="the --log file of `ragtrail serve`")
+    stats.add_argument("--scope", default="default")
+    stats.add_argument("--days", type=float, default=30.0, help="look back this many days")
+    stats.add_argument(
+        "--tokens-per-call",
+        type=int,
+        default=DEFAULT_TOKENS_PER_CALL,
+        help="assumed tokens of one skipped search call (an estimate, not measured)",
+    )
+    stats.set_defaults(func=_stats)
+
     purge = sub.add_parser("purge", help="delete expired trails")
     purge.add_argument("--db", required=True)
     purge.set_defaults(func=_purge)
@@ -150,8 +181,14 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point of the `ragtrail` command."""
     args = build_parser().parse_args(argv)
-    if getattr(args, "ttl_days", 1) <= 0 or getattr(args, "budget", 1) < 1:
-        print("error: --ttl-days and --budget must be positive", file=sys.stderr)
+    positive = (
+        getattr(args, "ttl_days", 1) > 0
+        and getattr(args, "budget", 1) >= 1
+        and getattr(args, "days", 1) > 0
+        and getattr(args, "tokens_per_call", 1) >= 1
+    )
+    if not positive:
+        print("error: --ttl-days, --budget, --days and --tokens-per-call must be positive", file=sys.stderr)
         return 2
     scope = getattr(args, "scope", "default")
     if not scope or "#" in scope:

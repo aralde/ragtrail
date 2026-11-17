@@ -188,6 +188,8 @@ def recall(
     - `hint`: similarity ≥ `hint_threshold`, or some nodes changed; lists only still-valid nodes.
     - `miss`: nothing similar, or every useful node changed (that trajectory is marked stale).
 
+    Trajectories whose answer was rejected (see `reject`) are skipped: that question gets a fresh search.
+
     `allow_prefetch=False` caps the mode at `hint` (for resolvers that cannot read node text).
     With an `embedder`, trails recorded with the same model also match by cosine (`embed_config` thresholds),
     which catches paraphrases that share few words.
@@ -219,11 +221,25 @@ def recall(
     ranked = _rank(
         store.candidates(scope, keys), sig, config, vector, embedder.name if embedder else None, embed_config
     )
+    return _decide(store, resolver, scope, ranked, budget_tokens, estimator, allow_prefetch)
+
+
+def _decide(
+    store: TrajectoryStore,
+    resolver: NodeResolver,
+    scope: str,
+    ranked: list[_Match],
+    budget_tokens: int,
+    estimator: Estimator,
+    allow_prefetch: bool,
+) -> RecallResult:
     best_sim = ranked[0].score if ranked else 0.0
     for match in ranked:
         if match.level == 0:
             break
         trajectory = match.trajectory
+        if trajectory.rejections:
+            continue
         valid = [r for r in trajectory.useful if resolver.content_hash(r.node_id) == r.content_hash]
         changed = [r.node_id for r in trajectory.useful if r not in valid]
         if not valid:
@@ -243,3 +259,55 @@ def recall(
             matched_by=match.matched_by,
         )
     return _miss(min(1.0, best_sim))
+
+
+def reject(
+    store: TrajectoryStore,
+    resolver: NodeResolver,
+    query: str,
+    scope: str,
+    *,
+    config: MatchConfig = DEFAULT_CONFIG,
+    embedder: Embedder | None = None,
+    embed_config: EmbedConfig = DEFAULT_EMBED_CONFIG,
+) -> list[str]:
+    """Report that the answer to `query` was rejected: demote the trail `recall` would serve for it.
+
+    Only that trail (the first non-rejected match whose useful nodes still have a valid hash) gets a
+    rejection and is no longer recalled; other matching trails stay available. Returns the ids of the
+    demoted trails: empty or one.
+
+    >>> from ragtrail.recorder import Recorder
+    >>> from ragtrail.resolver import GenericResolver, text_hash
+    >>> from ragtrail.store import SQLiteStore
+    >>> resolver = GenericResolver(lambda i: text_hash("x"), lambda i, n: "x")
+    >>> store = SQLiteStore(":memory:")
+    >>> rec = Recorder(store, resolver, scope="acme", query="When do access tokens expire?")
+    >>> rec.cite(["n33"]); _ = rec.commit("verified")
+    >>> len(reject(store, resolver, "when do the access tokens expire", "acme"))
+    1
+    >>> recall(store, resolver, "when do the access tokens expire", "acme").mode
+    'miss'
+    """
+    query_norm = normalize_query(query, config)
+    if not query_norm:
+        return []
+    sig = signature(query_norm, config)
+    keys = band_keys(scope, sig, config)
+    vector = None
+    if embedder is not None:
+        vector = normalize_vector(embedder.embed([query])[0])
+        keys += embed_band_keys(scope, vector, embed_config)
+    ranked = _rank(
+        store.candidates(scope, keys), sig, config, vector, embedder.name if embedder else None, embed_config
+    )
+    for match in ranked:
+        if match.level == 0:
+            break
+        trajectory = match.trajectory
+        if trajectory.rejections:
+            continue
+        if any(resolver.content_hash(r.node_id) == r.content_hash for r in trajectory.useful):
+            store.incr_rejections(scope, trajectory.id)
+            return [trajectory.id]
+    return []

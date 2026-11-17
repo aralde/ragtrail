@@ -55,6 +55,10 @@ class TrajectoryStore(Protocol):
         """Increment the hit counter and return the new value (0 if missing or expired)."""
         ...
 
+    def incr_rejections(self, scope: str, trajectory_id: str) -> int:
+        """Count one rejected answer against a trajectory; return the new count (0 if missing or expired)."""
+        ...
+
     def purge_expired(self) -> int:
         """Delete expired trajectories and their band entries; return how many were deleted."""
         ...
@@ -78,6 +82,7 @@ CREATE TABLE IF NOT EXISTS trajectories (
     created_at REAL NOT NULL,
     expires_at REAL NOT NULL,
     hits INTEGER NOT NULL DEFAULT 0,
+    rejections INTEGER NOT NULL DEFAULT 0,
     stale INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS trajectories_expires ON trajectories (expires_at);
@@ -119,6 +124,12 @@ class SQLiteStore:
         self._conn = sqlite3.connect(str(path))
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(trajectories)")}
+        if "rejections" not in columns:
+            with self._conn:
+                self._conn.execute(
+                    "ALTER TABLE trajectories ADD COLUMN rejections INTEGER NOT NULL DEFAULT 0"
+                )
 
     def close(self) -> None:
         """Close the underlying connection."""
@@ -139,8 +150,10 @@ class SQLiteStore:
         return _ts(self._clock())
 
     @staticmethod
-    def _load(data: str, hits: int, stale: int) -> Trajectory:
-        return Trajectory.model_validate_json(data).model_copy(update={"hits": hits, "stale": bool(stale)})
+    def _load(data: str, hits: int, rejections: int, stale: int) -> Trajectory:
+        return Trajectory.model_validate_json(data).model_copy(
+            update={"hits": hits, "rejections": rejections, "stale": bool(stale)}
+        )
 
     def put(self, trajectory: Trajectory, band_keys: Sequence[str]) -> None:
         _check_band_keys(trajectory.scope, band_keys)
@@ -148,8 +161,9 @@ class SQLiteStore:
         created = _ts(trajectory.created_at)
         with self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO trajectories (pk, scope, data, created_at, expires_at, hits, stale)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO trajectories"
+                " (pk, scope, data, created_at, expires_at, hits, rejections, stale)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     pk,
                     trajectory.scope,
@@ -157,6 +171,7 @@ class SQLiteStore:
                     created,
                     _ts(trajectory.expires_at),
                     trajectory.hits,
+                    trajectory.rejections,
                     int(trajectory.stale),
                 ),
             )
@@ -174,7 +189,7 @@ class SQLiteStore:
 
     def get(self, scope: str, trajectory_id: str) -> Trajectory | None:
         row = self._conn.execute(
-            "SELECT data, hits, stale FROM trajectories WHERE pk = ? AND expires_at > ?",
+            "SELECT data, hits, rejections, stale FROM trajectories WHERE pk = ? AND expires_at > ?",
             (trajectory_key(scope, trajectory_id), self._now()),
         ).fetchone()
         return None if row is None else self._load(*row)
@@ -186,7 +201,7 @@ class SQLiteStore:
             return []
         placeholders = ",".join("?" * len(keys))
         rows = self._conn.execute(
-            "SELECT t.data, t.hits, t.stale FROM trajectories t"
+            "SELECT t.data, t.hits, t.rejections, t.stale FROM trajectories t"
             f" WHERE t.pk IN (SELECT trajectory_pk FROM bands WHERE pk IN ({placeholders}))"
             " AND t.scope = ? AND t.stale = 0 AND t.expires_at > ?"
             " ORDER BY t.created_at DESC, t.pk DESC",
@@ -205,6 +220,16 @@ class SQLiteStore:
         with self._conn:
             row = self._conn.execute(
                 "UPDATE trajectories SET hits = hits + 1 WHERE pk = ? AND expires_at > ? RETURNING hits",
+                (pk, self._now()),
+            ).fetchone()
+        return 0 if row is None else int(row[0])
+
+    def incr_rejections(self, scope: str, trajectory_id: str) -> int:
+        pk = trajectory_key(scope, trajectory_id)
+        with self._conn:
+            row = self._conn.execute(
+                "UPDATE trajectories SET rejections = rejections + 1 WHERE pk = ? AND expires_at > ?"
+                " RETURNING rejections",
                 (pk, self._now()),
             ).fetchone()
         return 0 if row is None else int(row[0])

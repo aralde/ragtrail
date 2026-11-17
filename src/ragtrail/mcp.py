@@ -21,9 +21,10 @@ from ragtrail.match import DEFAULT_CONFIG, MatchConfig
 from ragtrail.models import Outcome, RecallResult, Step
 from ragtrail.recall import DEFAULT_BUDGET_TOKENS
 from ragtrail.recall import recall as recall_trail
+from ragtrail.recall import reject as reject_trails
 from ragtrail.recorder import DEFAULT_TTL, Recorder
 from ragtrail.resolver import NodeResolver
-from ragtrail.store import TrajectoryStore
+from ragtrail.store import TrajectoryStore, utc_now
 
 INSTRUCTIONS = """\
 ragtrail remembers which documentation nodes answered similar questions before.
@@ -34,7 +35,9 @@ ragtrail remembers which documentation nodes answered similar questions before.
    - mode=miss: search as usual.
 2. After answering, call `record` with the question, the node ids your answer cites and the tool calls
    you made.
-   Only record when the answer is grounded in those nodes. Never pass the answer text."""
+   Only record when the answer is grounded in those nodes. Never pass the answer text.
+3. If the user rejects the answer that a recalled path led to, call `reject` with the same question so the
+   path is not served for it again."""
 
 UNVERIFIED_NOTE = "  (ragtrail runs without an index here: node contents were not re-checked; read them.)"
 
@@ -95,7 +98,7 @@ def create_server(
     embedder: Embedder | None = None,
     strip_context: str | None = None,
 ) -> MCPServer:
-    """Build an MCP server with `recall` and `record` bound to `store`, `resolver` and `scope`.
+    """Build an MCP server with `recall`, `record` and `reject` bound to `store`, `resolver` and `scope`.
 
     `allow_record=False` serves `recall` only (evals keep the trail store fixed).
     `log` appends one JSON line per call (tool, arguments, structured result); evals count calls with it.
@@ -108,7 +111,7 @@ def create_server(
     >>> from ragtrail.store import SQLiteStore
     >>> server = create_server(SQLiteStore(":memory:"), None, "acme")
     >>> sorted(t.name for t in asyncio.run(server.list_tools()))
-    ['recall', 'record']
+    ['recall', 'record', 'reject']
     """
     verified = resolver is not None
     active: NodeResolver = resolver if resolver is not None else UnverifiedResolver()
@@ -122,6 +125,8 @@ def create_server(
     def emit(tool: str, args: dict[str, Any], result: CallToolResult) -> CallToolResult:
         if log is not None:
             entry = {
+                "ts": utc_now().isoformat(),
+                "scope": scope,
                 "tool": tool,
                 "args": args,
                 "error": result.is_error,
@@ -175,6 +180,15 @@ def create_server(
             {"recorded": True, "trajectory_id": trajectory.id, "nodes": nodes},
         )
 
+    def do_reject(query: str) -> CallToolResult:
+        demoted = reject_trails(store, active, bare(query), scope, config=config, embedder=embedder)
+        if not demoted:
+            return _result("No recalled path matches this question; nothing to demote.", {"rejected": []})
+        return _result(
+            f"Demoted {len(demoted)} path(s): it will not be served for this question again.",
+            {"rejected": demoted},
+        )
+
     @server.tool(annotations=_ANNOTATIONS)
     async def recall(query: str, budget_tokens: int = budget_tokens) -> CallToolResult:
         """Look up the retrieval path of a similar question answered before. Call it first, with the user's
@@ -195,6 +209,12 @@ def create_server(
         args = {"query": query, "cited": cited, "outcome": outcome, "steps": steps}
         return emit("record", args, do_record(query, cited, outcome, steps))
 
+    async def reject(query: str) -> CallToolResult:
+        """Report that the user rejected the answer to `query`. Pass the same question that was given to
+        `recall`: the path recalled for it is demoted and the question gets a fresh search next time."""
+        return emit("reject", {"query": query}, do_reject(query))
+
     if allow_record:
         server.tool(annotations=_ANNOTATIONS)(record)
+        server.tool(annotations=_ANNOTATIONS)(reject)
     return server

@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS ragtrail_trajectories (
     created_at DOUBLE PRECISION NOT NULL,
     expires_at DOUBLE PRECISION NOT NULL,
     hits INTEGER NOT NULL DEFAULT 0,
+    rejections INTEGER NOT NULL DEFAULT 0,
     stale BOOLEAN NOT NULL DEFAULT FALSE
 );
 CREATE INDEX IF NOT EXISTS ragtrail_trajectories_expires ON ragtrail_trajectories (expires_at);
@@ -83,8 +84,10 @@ class PostgresStore:
         return _ts(self._clock())
 
     @staticmethod
-    def _load(data: str, hits: int, stale: bool) -> Trajectory:
-        return Trajectory.model_validate_json(data).model_copy(update={"hits": hits, "stale": stale})
+    def _load(data: str, hits: int, rejections: int, stale: bool) -> Trajectory:
+        return Trajectory.model_validate_json(data).model_copy(
+            update={"hits": hits, "rejections": rejections, "stale": stale}
+        )
 
     def put(self, trajectory: Trajectory, band_keys: Sequence[str]) -> None:
         _check_band_keys(trajectory.scope, band_keys)
@@ -95,11 +98,12 @@ class PostgresStore:
             for key in keys:
                 self._conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (key,))
             self._conn.execute(
-                "INSERT INTO ragtrail_trajectories (pk, scope, data, created_at, expires_at, hits, stale)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s)"
+                "INSERT INTO ragtrail_trajectories"
+                " (pk, scope, data, created_at, expires_at, hits, rejections, stale)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
                 " ON CONFLICT (pk) DO UPDATE SET scope = EXCLUDED.scope, data = EXCLUDED.data,"
                 " created_at = EXCLUDED.created_at, expires_at = EXCLUDED.expires_at,"
-                " hits = EXCLUDED.hits, stale = EXCLUDED.stale",
+                " hits = EXCLUDED.hits, rejections = EXCLUDED.rejections, stale = EXCLUDED.stale",
                 (
                     pk,
                     trajectory.scope,
@@ -107,6 +111,7 @@ class PostgresStore:
                     created,
                     _ts(trajectory.expires_at),
                     trajectory.hits,
+                    trajectory.rejections,
                     trajectory.stale,
                 ),
             )
@@ -125,7 +130,8 @@ class PostgresStore:
 
     def get(self, scope: str, trajectory_id: str) -> Trajectory | None:
         row = self._conn.execute(
-            "SELECT data, hits, stale FROM ragtrail_trajectories WHERE pk = %s AND expires_at > %s",
+            "SELECT data, hits, rejections, stale FROM ragtrail_trajectories"
+            " WHERE pk = %s AND expires_at > %s",
             (trajectory_key(scope, trajectory_id), self._now()),
         ).fetchone()
         return None if row is None else self._load(*row)
@@ -136,7 +142,7 @@ class PostgresStore:
         if not keys:
             return []
         rows = self._conn.execute(
-            "SELECT t.data, t.hits, t.stale FROM ragtrail_trajectories t"
+            "SELECT t.data, t.hits, t.rejections, t.stale FROM ragtrail_trajectories t"
             " WHERE t.pk IN (SELECT trajectory_pk FROM ragtrail_bands WHERE pk = ANY(%s))"
             " AND t.scope = %s AND NOT t.stale AND t.expires_at > %s"
             " ORDER BY t.created_at DESC, t.pk DESC",
@@ -155,6 +161,15 @@ class PostgresStore:
         row = self._conn.execute(
             "UPDATE ragtrail_trajectories SET hits = hits + 1 WHERE pk = %s AND expires_at > %s"
             " RETURNING hits",
+            (trajectory_key(scope, trajectory_id), self._now()),
+        ).fetchone()
+        self._conn.commit()
+        return 0 if row is None else int(row[0])
+
+    def incr_rejections(self, scope: str, trajectory_id: str) -> int:
+        row = self._conn.execute(
+            "UPDATE ragtrail_trajectories SET rejections = rejections + 1"
+            " WHERE pk = %s AND expires_at > %s RETURNING rejections",
             (trajectory_key(scope, trajectory_id), self._now()),
         ).fetchone()
         self._conn.commit()
