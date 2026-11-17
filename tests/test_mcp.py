@@ -32,7 +32,7 @@ def test_tools_listed_with_schemas() -> None:
     async def scenario() -> None:
         async with Client(create_server(SQLiteStore(":memory:"), Corpus().resolver(), "acme")) as client:
             tools = {t.name: t for t in (await client.list_tools()).tools}
-            assert sorted(tools) == ["recall", "record"]
+            assert sorted(tools) == ["recall", "record", "reject"]
             assert set(tools["recall"].input_schema["properties"]) == {"query", "budget_tokens"}
             assert set(tools["record"].input_schema["properties"]) == {"query", "cited", "outcome", "steps"}
             assert "scope" not in json.dumps(tools["recall"].input_schema)
@@ -125,7 +125,7 @@ def test_serve_over_stdio_subprocess(tmp_path: Path) -> None:
 
     async def scenario() -> None:
         async with Client(params) as client:
-            assert len((await client.list_tools()).tools) == 2
+            assert len((await client.list_tools()).tools) == 3
             await client.call_tool("record", {"query": Q1, "cited": ["c1"], "outcome": "accepted"})
         async with Client(params) as client:
             hit = await client.call_tool("recall", {"query": Q2})
@@ -218,3 +218,56 @@ def test_strip_context_matches_the_bare_question() -> None:
     anyio.run(scenario)
     row = store._conn.execute("SELECT data FROM trajectories").fetchone()
     assert json.loads(row[0])["query"] == Q1
+
+
+def test_reject_demotes_trail_and_stats_report_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    corpus = Corpus()
+    db = tmp_path / "trails.db"
+    log = tmp_path / "calls.jsonl"
+    store = SQLiteStore(db)
+    steps = [
+        {"tool": "search", "args": {"q": "reset"}, "returned": ["n70"]},
+        {"tool": "read", "args": {"id": "n70"}, "returned": ["n70"]},
+    ]
+
+    async def scenario() -> None:
+        async with Client(create_server(store, corpus.resolver(), "acme", log=log)) as client:
+            await client.call_tool("recall", {"query": Q1})
+            await client.call_tool(
+                "record", {"query": Q1, "cited": ["n70", "n72"], "outcome": "verified", "steps": steps}
+            )
+            for _ in range(2):
+                assert data_of(await client.call_tool("recall", {"query": Q2}))["mode"] == "prefetch"
+            rejected = await client.call_tool("reject", {"query": Q2})
+            assert len(data_of(rejected)["rejected"]) == 1
+            assert data_of(await client.call_tool("recall", {"query": Q2}))["mode"] == "miss"
+            again = await client.call_tool("reject", {"query": Q2})
+            assert data_of(again)["rejected"] == []
+
+    anyio.run(scenario)
+    store.close()
+
+    assert main(["stats", "--db", str(db), "--log", str(log), "--scope", "acme", "--days", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "prefetch" in out and "miss" in out
+    assert "Search calls skipped (est.): 2" in out
+    assert "Tokens saved (est.): 1000" in out
+    assert Q1 in out
+    worst = out.split("Worst trails")[1]
+    assert "1" in worst and "2" in worst
+
+
+def test_stats_ignore_other_scope_and_old_entries(tmp_path: Path) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from ragtrail.stats import compute_stats
+
+    now = datetime(2026, 1, 10, tzinfo=UTC)
+    entries = [
+        {"ts": now.isoformat(), "scope": "acme", "tool": "recall", "mode": "miss"},
+        {"ts": now.isoformat(), "scope": "globex", "tool": "recall", "mode": "miss"},
+        {"ts": (now - timedelta(days=30)).isoformat(), "scope": "acme", "tool": "recall", "mode": "hint"},
+        {"tool": "recall", "mode": "hint"},
+    ]
+    stats = compute_stats(entries, SQLiteStore(":memory:"), "acme", days=7, now=now)
+    assert stats.modes == {"prefetch": 0, "hint": 0, "miss": 1}
