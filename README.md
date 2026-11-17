@@ -125,6 +125,30 @@ and run `ragtrail stats --db trails.db --log calls.jsonl --scope my-team --days 
 estimated savings and the trails with the most rejected answers. The token figure is an estimate
 (skipped search calls times `--tokens-per-call`, an assumed 500), not a measurement.
 
+## TypeScript and astorlm
+
+`clients/typescript` holds a thin client for the MCP server (`recall`, `record`, `reject`) and a ready hook for
+[astorlm](https://github.com/aralde/astorLM). The hook spawns `ragtrail serve`, recalls before the first turn of each
+question and adds the hint to the user message. It records only when the host app calls `accept()`. It is not on npm
+yet: from a checkout, build it with `cd clients/typescript && npm ci && npm run build`, then install it in your app
+with `npm install ./clients/typescript`.
+
+```ts
+import { createAgent } from 'astorlm'
+import { ragtrailHook } from 'ragtrail'
+
+const trail = ragtrailHook({ scope: 'docs', serverArgs: ['--subforest', 'corpus.db'] })
+const agent = await createAgent({ provider, tools, hooks: trail })
+
+await agent.run('How do I reset my password?')
+if (userAccepted) await trail.accept()   // records the cited nodes and tool calls
+else await trail.reject()                // demotes the recalled path
+```
+
+Cited nodes are the ids that tool outputs returned as `[id]` and the answer mentions. Pass `nodesFrom` for another
+id format, `accept({ cited })` to set them yourself, or `autoAccept` to record without a call. The answer text is
+never sent.
+
 ## Evaluation
 
 Summary and details: [`reports/README.md`](reports/README.md). Haiku agent and Sonnet judge through `claude -p`.
@@ -179,7 +203,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run
 ```
 
 The Postgres store tests run when `RAGTRAIL_PG_DSN` points at a database (CI provides one) and are skipped
-otherwise.
+otherwise. The TypeScript client: `cd clients/typescript && npm ci && npm run typecheck && npm test`.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
