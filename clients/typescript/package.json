@@ -1,0 +1,37 @@
+{
+  "name": "ragtrail",
+  "version": "0.1.0",
+  "description": "TypeScript client and astorlm hook for the ragtrail MCP server.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aralde/ragtrail.git",
+    "directory": "clients/typescript"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "astorlm": "^0.2.2",
+    "typescript": "^5.9.0"
+  }
+}
