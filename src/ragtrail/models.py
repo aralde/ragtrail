@@ -86,6 +86,7 @@ class Trajectory(_Frozen):
     created_at: AwareDatetime
     expires_at: AwareDatetime
     hits: int = Field(default=0, ge=0)
+    rejections: int = Field(default=0, ge=0)
     stale: bool = False
     embedding: list[float] | None = None
     embed_model: str | None = None

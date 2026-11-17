@@ -115,6 +115,12 @@ Other MCP clients (Claude Desktop, Cursor, …) use the same command in their JS
 Run it next to your retrieval tools (for example subforest's own MCP server). `ragtrail purge --db trails.db`
 deletes expired trails.
 
+When a user rejects an answer that a recalled path led to, the agent calls the `reject` tool with the same
+question: that path is demoted and the question gets a fresh search. Start the server with `--log calls.jsonl`
+and run `ragtrail stats --db trails.db --log calls.jsonl --scope my-team --days 30` for recalls by mode,
+estimated savings and the trails with the most rejected answers. The token figure is an estimate
+(skipped search calls times `--tokens-per-call`, an assumed 500), not a measurement.
+
 ## Evaluation
 
 Summary and details: [`reports/README.md`](reports/README.md). Haiku agent and Sonnet judge through `claude -p`.

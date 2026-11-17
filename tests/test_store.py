@@ -183,3 +183,13 @@ def test_sqlite_persists_across_connections(tmp_path: Path, clock: FakeClock) ->
 def test_sqlite_rejects_bad_band_cap() -> None:
     with pytest.raises(ValueError):
         SQLiteStore(":memory:", band_cap=0)
+
+
+def test_incr_rejections_persists(store: TrajectoryStore) -> None:
+    t = traj("acme")
+    store.put(t, [])
+    assert store.incr_rejections("acme", t.id) == 1
+    assert store.incr_rejections("acme", t.id) == 2
+    got = store.get("acme", t.id)
+    assert got is not None and got.rejections == 2
+    assert store.incr_rejections("acme", "missing") == 0
