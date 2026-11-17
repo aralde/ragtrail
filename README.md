@@ -130,7 +130,8 @@ estimated savings and the trails with the most rejected answers. The token figur
 `clients/typescript` holds a thin client for the MCP server (`recall`, `record`, `reject`) and a ready hook for
 [astorlm](https://github.com/aralde/astorLM). The hook spawns `ragtrail serve`, recalls before the first turn of each
 question and adds the hint to the user message. It records only when the host app calls `accept()`. It is not on npm
-yet: install it with `npm install ./clients/typescript` from a checkout.
+yet: from a checkout, build it with `cd clients/typescript && npm ci && npm run build`, then install it in your app
+with `npm install ./clients/typescript`.
 
 ```ts
 import { createAgent } from 'astorlm'

@@ -2,7 +2,9 @@
 
 Thin client for the [ragtrail](https://github.com/aralde/ragtrail) MCP server and a ready hook for
 [astorlm](https://github.com/aralde/astorLM). Needs `pip install 'ragtrail[mcp]'` so that `ragtrail serve` is on the
-path (or pass `command`).
+path (or pass `command`). It is not on npm yet: from a checkout, build it with
+`cd clients/typescript && npm ci && npm run build`, then install it in your app with
+`npm install ./clients/typescript`.
 
 ```ts
 import { RagtrailClient, ragtrailHook } from 'ragtrail'
