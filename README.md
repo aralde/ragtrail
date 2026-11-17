@@ -84,6 +84,10 @@ ragtrail serve --db trails.db --scope my-team --subforest corpus.db
 The server exposes two tools: `recall(query, budget_tokens?)` at the start of a question and
 `record(query, cited, outcome?, steps?)` after a grounded answer. Each server is bound to one `--scope`.
 
+To share trails across a team, install `pip install 'ragtrail[postgres]'` and pass a database URL instead of a
+file: `--db postgresql://user:pass@host/ragtrail`. Everyone using the same URL and `--scope` shares the trails;
+other scopes stay apart. `PostgresStore` is also usable directly from Python.
+
 Add `--embed` (needs `pip install 'ragtrail[embed]'`) to also match paraphrases by embeddings. It uses a local
 CPU model, `BAAI/bge-small-en-v1.5` by default, so there is no API cost.
 
@@ -167,6 +171,9 @@ fix, tenant isolation, and admission gating. Pass a name (`freshness`, `fixed-co
 uv sync --all-extras
 uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest
 ```
+
+The Postgres store tests run when `RAGTRAIL_PG_DSN` points at a database (CI provides one) and are skipped
+otherwise.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
