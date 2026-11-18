@@ -61,14 +61,30 @@ A runnable version over plain chunk ids is in [`examples/chunk_rag.py`](examples
 3. **Admit.** A trail is written only with a positive signal (verified citations, user feedback, or an explicit
    accept). Scopes (tenant, document, permission group) never mix.
 
+New documents do not change any cited hash. To catch them, pass your own search function and a sample rate:
+
+```python
+from ragtrail import FreshnessCheck
+
+check = FreshnessCheck(search=lambda q: my_search(q), sample_rate=0.1)  # node ids, best first
+with turn(store, resolver, scope="my-team", query=question, freshness=check) as t:
+    ...
+```
+
+On 10% of the recalls that would serve a trail, ragtrail re-runs the trail's original question through `search`. If a
+node the trail never saw ranks above every node it cited, the trail is marked stale and the question gets a normal
+search. Each check costs one search, so the rate trades freshness against what the trail saves. `recall(...)`
+takes the same `freshness` argument; the MCP server does not run it, since it has no access to your search.
+
 Design decisions, with the numbers that drove them, are in [`docs/decisions.md`](docs/decisions.md).
 
 ## Limitations
 
 - Savings come only from repeated or reworded questions; the evaluation uses model-written repeats, so real traffic
   will save less.
-- Hash validation catches *changed* nodes, not *new* documents that would now be better evidence; only the TTL
-  covers that. The same holds for exported fetch scripts.
+- Hash validation catches *changed* nodes, not *new* documents that would now be better evidence. An optional
+  freshness check (below) re-runs a sample of searches to catch them; without it only the TTL covers that.
+  Exported fetch scripts do not run the freshness check, so for them only the TTL covers it.
 - Admission quality decides safety. A path from a wrong answer sends the agent back to the same mistake.
 - Evaluated with one agent model (Haiku) and one judge (Sonnet, checked on 40 labels, not human-labelled).
 - The evaluation harness needs [subforest](https://github.com/aralde/subforest) and the `claude` CLI; the library

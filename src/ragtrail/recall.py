@@ -14,6 +14,7 @@ from ragtrail.embed import (
     embed_band_keys,
     normalize_vector,
 )
+from ragtrail.freshness import FreshnessCheck
 from ragtrail.match import DEFAULT_CONFIG, MatchConfig, band_keys, normalize_query, signature, similarity
 from ragtrail.models import Mode, NodeRef, RecallResult, Trajectory
 from ragtrail.resolver import NodeResolver, estimate_tokens
@@ -181,6 +182,7 @@ def recall(
     allow_prefetch: bool = True,
     embedder: Embedder | None = None,
     embed_config: EmbedConfig = DEFAULT_EMBED_CONFIG,
+    freshness: FreshnessCheck | None = None,
 ) -> RecallResult:
     """Find a trajectory for a similar past question in `scope` and hand back its still-valid path.
 
@@ -193,6 +195,8 @@ def recall(
     `allow_prefetch=False` caps the mode at `hint` (for resolvers that cannot read node text).
     With an `embedder`, trails recorded with the same model also match by cosine (`embed_config` thresholds),
     which catches paraphrases that share few words.
+    With a `freshness` check, a sampled recall re-runs the trail's question through the caller's search and
+    marks the trail stale when a node it never saw now ranks above the cited ones (see `FreshnessCheck`).
 
     >>> from ragtrail.recorder import Recorder
     >>> from ragtrail.resolver import GenericResolver, text_hash
@@ -221,7 +225,7 @@ def recall(
     ranked = _rank(
         store.candidates(scope, keys), sig, config, vector, embedder.name if embedder else None, embed_config
     )
-    return _decide(store, resolver, scope, ranked, budget_tokens, estimator, allow_prefetch)
+    return _decide(store, resolver, scope, ranked, budget_tokens, estimator, allow_prefetch, freshness)
 
 
 def _decide(
@@ -232,7 +236,9 @@ def _decide(
     budget_tokens: int,
     estimator: Estimator,
     allow_prefetch: bool,
+    freshness: FreshnessCheck | None = None,
 ) -> RecallResult:
+    sampled = freshness is not None and freshness.sampled()
     best_sim = ranked[0].score if ranked else 0.0
     for match in ranked:
         if match.level == 0:
@@ -242,7 +248,7 @@ def _decide(
             continue
         valid = [r for r in trajectory.useful if resolver.content_hash(r.node_id) == r.content_hash]
         changed = [r.node_id for r in trajectory.useful if r not in valid]
-        if not valid:
+        if not valid or (sampled and freshness is not None and freshness.outranked(trajectory)):
             store.mark_stale(scope, trajectory.id)
             continue
         full = allow_prefetch and match.level == 2 and not changed
