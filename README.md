@@ -84,6 +84,7 @@ Design decisions, with the numbers that drove them, are in [`docs/decisions.md`]
   will save less.
 - Hash validation catches *changed* nodes, not *new* documents that would now be better evidence. An optional
   freshness check (below) re-runs a sample of searches to catch them; without it only the TTL covers that.
+  Exported fetch scripts do not run the freshness check, so for them only the TTL covers it.
 - Admission quality decides safety. A path from a wrong answer sends the agent back to the same mistake.
 - Evaluated with one agent model (Haiku) and one judge (Sonnet, checked on 40 labels, not human-labelled).
 - The evaluation harness needs [subforest](https://github.com/aralde/subforest) and the `claude` CLI; the library
@@ -139,6 +140,23 @@ question: that path is demoted and the question gets a fresh search. Start the s
 and run `ragtrail stats --db trails.db --log calls.jsonl --scope my-team --days 30` for recalls by mode,
 estimated savings and the trails with the most rejected answers. The token figure is an estimate
 (skipped search calls times `--tokens-per-call`, an assumed 500), not a measurement.
+
+## Export a stable trail as a fetch script
+
+When the same question keeps coming back and its trail stays valid, you can skip the agent's retrieval turn:
+
+```bash
+ragtrail export --query "What are the rate limits?" --db trails.db --scope support \
+  --resolver mypkg.index:make_resolver -o rate_limits.py    # or pass a trail id instead of --query
+python rate_limits.py
+```
+
+The script holds the trail's node ids and the hashes they were cited with, never an answer. It reads the nodes
+through the same resolver (`--resolver` or `--subforest`) and prints `{"trail", "documents": [{node_id, label,
+content_hash, text}]}` as JSON. If any node changed or vanished, or the trail's TTL ran out, it prints nothing on
+stdout and exits with 3: fall back to the agent. A model still writes the answer from the documents. Only trails
+that are not stale, have no rejected answer and whose nodes all still match can be exported; the same trail always
+gives the same script.
 
 ## TypeScript and astorlm
 
