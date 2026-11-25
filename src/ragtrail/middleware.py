@@ -8,6 +8,7 @@ from datetime import timedelta
 from typing import Any
 
 from ragtrail.embed import Embedder
+from ragtrail.freshness import FreshnessCheck
 from ragtrail.match import DEFAULT_CONFIG, MatchConfig
 from ragtrail.models import Outcome, RecallResult, Trajectory
 from ragtrail.recall import DEFAULT_BUDGET_TOKENS, recall
@@ -53,8 +54,11 @@ def turn(
     ttl: timedelta = DEFAULT_TTL,
     clock: Clock = utc_now,
     embedder: Embedder | None = None,
+    freshness: FreshnessCheck | None = None,
 ) -> Iterator[Turn]:
     """Recall on entry, record on exit. An exception inside the block drops the turn and propagates.
+
+    `freshness` is passed to `recall`: a sampled turn re-searches the trail's question (see `FreshnessCheck`).
 
     >>> from ragtrail.resolver import GenericResolver, text_hash
     >>> from ragtrail.store import SQLiteStore
@@ -72,7 +76,14 @@ def turn(
     'prefetch'
     """
     result = recall(
-        store, resolver, query, scope, budget_tokens=budget_tokens, config=config, embedder=embedder
+        store,
+        resolver,
+        query,
+        scope,
+        budget_tokens=budget_tokens,
+        config=config,
+        embedder=embedder,
+        freshness=freshness,
     )
     recorder = Recorder(store, resolver, scope, query, config=config, ttl=ttl, clock=clock, embedder=embedder)
     t = Turn(result, recorder)
